@@ -4,7 +4,7 @@ import Prelude
 import Prim hiding (Type)
 
 import Data.Array as Array
-import Data.Foldable (foldl)
+import Data.Foldable (fold, foldl)
 import Data.List (List, (:))
 import Data.List as List
 import Data.Maybe (Maybe)
@@ -17,8 +17,8 @@ data Element a
   | Solved Int (Maybe (Type a)) (Type a)
   | Marker String
 
-derive instance Eq a => Eq (Element a)
-derive instance Ord a => Ord (Element a)
+derive instance Eq (Element a)
+derive instance Ord (Element a)
 derive instance Functor Element
 
 newtype Context a = Context (List (Element a))
@@ -38,3 +38,7 @@ apply (Context context) = flip (foldl go) context
   where
   go t (Solved u _ m) = Type.solveType u m t
   go t _ = t
+
+discardUntil :: forall a. Context a -> Element a -> Context a
+discardUntil (Context context) element =
+  Context $ fold $ List.tail $ _.rest $ List.span (_ /= element) context
