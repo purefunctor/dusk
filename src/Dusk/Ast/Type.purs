@@ -22,8 +22,53 @@ data Type a
   | Application { ann :: a, function :: Type a, argument :: Type a }
   | KindApplication { ann :: a, function :: Type a, argument :: Type a }
 
-derive instance Eq a => Eq (Type a)
-derive instance Ord a => Ord (Type a)
+instance Eq (Type a) where
+  eq = case _, _ of
+    Forall f1, Forall f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Variable f1, Variable f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Skolem f1, Skolem f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Unsolved f1, Unsolved f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Constructor f1, Constructor f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Application f1, Application f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    KindApplication f1, KindApplication f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    _, _ ->
+      false
+
+instance Ord (Type a) where
+  compare = case _, _ of
+    Forall f1, Forall f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Variable f1, Variable f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Skolem f1, Skolem f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Unsolved f1, Unsolved f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Constructor f1, Constructor f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Application f1, Application f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    KindApplication f1, KindApplication f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    t1, t2 ->
+      typeIndex t1 `compare` typeIndex t2
+    where
+    typeIndex = case _ of
+      Forall _ -> 0
+      Variable _ -> 1
+      Skolem _ -> 2
+      Unsolved _ -> 3
+      Constructor _ -> 4
+      Application _ -> 5
+      KindApplication _ -> 6
+
 derive instance Functor Type
 
 solveType :: forall a. Int -> Type a -> Type a -> Type a
