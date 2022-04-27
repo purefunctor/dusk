@@ -7,7 +7,7 @@ import Data.Array as Array
 import Data.Foldable (fold, foldl)
 import Data.List (List, (:))
 import Data.List as List
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(..))
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 
@@ -33,12 +33,25 @@ fromArray = Context <<< List.fromFoldable <<< Array.reverse
 push :: forall a. Element a -> Context a -> Context a
 push element (Context context) = Context (element : context)
 
+discardUntil :: forall a. Context a -> Element a -> Context a
+discardUntil (Context context) element =
+  Context $ fold $ List.tail $ _.rest $ List.span (_ /= element) context
+
 apply :: forall a. Context a -> Type a -> Type a
 apply (Context context) = flip (foldl go) context
   where
   go t (Solved u _ m) = Type.solveType u m t
   go t _ = t
 
-discardUntil :: forall a. Context a -> Element a -> Context a
-discardUntil (Context context) element =
-  Context $ fold $ List.tail $ _.rest $ List.span (_ /= element) context
+lookupVariable :: forall a. String -> Context a -> Maybe { name :: String, kind_ :: Maybe (Type a) }
+lookupVariable name (Context context) = List.findMap go context
+  where
+  go (Variable name' kind_) | name == name' = Just { name, kind_ }
+  go _ = Nothing
+
+lookupUnsolved :: forall a. Int -> Context a -> Maybe { name :: Int, kind_ :: Maybe (Type a) }
+lookupUnsolved name (Context context) = List.findMap go context
+  where
+  go (Unsolved name' kind_) | name == name' = Just { name, kind_ }
+  go _ = Nothing
+
