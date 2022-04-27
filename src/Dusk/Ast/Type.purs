@@ -3,10 +3,14 @@ module Dusk.Ast.Type where
 import Prelude hiding (apply)
 import Prim hiding (Type)
 
+import Data.Foldable (foldMap)
 import Data.Lens (Getter', to)
 import Data.Lens.Prism (Prism', prism')
-import Data.Maybe (Maybe(..))
-import Data.Traversable (traverse)
+import Data.Map (Map)
+import Data.Map as Map
+import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Set (Set)
+import Data.Set as Set
 import Partial.Unsafe (unsafeCrashWith)
 
 data Type a
@@ -42,6 +46,112 @@ solveType u m t = case t of
       }
   Unsolved { name: u' } | u == u' -> m
   _ -> t
+
+variablesInType :: forall a. Type a -> Set String
+variablesInType = case _ of
+  Forall { type_, kind_ } ->
+    variablesInType type_ <> Set.unions (variablesInType <$> kind_)
+  Variable { name } ->
+    Set.singleton name
+  Skolem _ ->
+    Set.empty
+  Unsolved _ ->
+    Set.empty
+  Constructor _ ->
+    Set.empty
+  Application { function, argument } ->
+    variablesInType function <> variablesInType argument
+  KindApplication { function, argument } ->
+    variablesInType function <> variablesInType argument
+
+substituteType :: forall a. String -> Type a -> Type a -> Type a
+substituteType k v = substituteTypes (Map.singleton k v)
+
+substituteTypes :: forall a. Map String (Type a) -> Type a -> Type a
+substituteTypes = go Set.empty
+  where
+  freshen :: Set String -> String -> String
+  freshen known = goFreshen 0
+    where
+    goFreshen :: Int -> String -> String
+    goFreshen modifier current =
+      let
+        current' = current <> show modifier
+      in
+        if current' `Set.member` known then
+          goFreshen (modifier + 1) current
+        else
+          current'
+
+  go :: Set String -> Map String (Type a) -> Type a -> Type a
+  go seen repl = case _ of
+    Forall fields@{ ann, name, kind_, type_ }
+      -- `Forall`-bound names cannot be replaced.
+      | Map.member name repl ->
+          Forall $ fields
+            { kind_ = go seen repl <$> kind_
+            }
+      -- `Forall`-bound names that also appear in the replacements mapping must
+      -- be renamed, as they potentially collide. Similarly, we also take into
+      -- account the variables that we've already seen from other `Forall`s, as
+      -- well as other keys that appear in the replacements mapping.
+      --
+      -- For example, given the following type:
+      --
+      -- forall a0 a. a -> b
+      --
+      -- and the following replacements mapping:
+      --
+      -- b  ~ a
+      -- a1 ~ a2
+      -- a2 ~ a3
+      --
+      -- We end up freshening the `Forall`-bound `a` into `a4` in the following
+      -- type because of a few factors:
+      --
+      -- forall a0 a4. a4 -> a
+      --
+      -- * `a` appears in the replacement mapping in a value
+      -- * `a0` is already bound by another `Forall`
+      -- * `a1` appears in the replacement mapping in a key
+      -- * `a2` appears in the replacement mapping as a key and value
+      -- * `a3` appears in the replacement mapping in a value
+      | varsInWith <- foldMap variablesInType repl
+      , Set.member name varsInWith ->
+          let
+            name' = freshen (varsInWith <> seen <> Map.keys repl) name
+            type_' = go seen (Map.singleton name (Variable { ann, name: name' })) type_
+          in
+            Forall $ fields
+              { name = name'
+              , kind_ = go seen repl <$> kind_
+              , type_ = go (Set.insert name' seen) repl type_'
+              }
+      -- Otherwise...
+      | otherwise ->
+          Forall $ fields
+            { kind_ = go seen repl <$> kind_
+            , type_ = go (Set.insert name seen) repl type_
+            }
+
+    original@(Variable { name }) ->
+      fromMaybe original (Map.lookup name repl)
+
+    original@(Skolem _) -> original
+    original@(Unsolved _) -> original
+    original@(Constructor _) -> original
+
+    Application fields@{ function, argument } ->
+      Application $ fields
+        { function = go seen repl function
+        , argument = go seen repl argument
+        }
+
+    KindApplication fields@{ function, argument } ->
+      KindApplication $ fields
+        { function = go seen repl function
+        , argument = go seen repl argument
+        }
 
 annForType :: forall a. Getter' (Type a) a
 annForType = to case _ of
