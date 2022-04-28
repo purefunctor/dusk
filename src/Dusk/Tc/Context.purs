@@ -23,8 +23,8 @@ derive instance Functor Element
 
 newtype Context a = Context (List (Element a))
 
-derive newtype instance Eq a => Eq (Context a)
-derive newtype instance Ord a => Ord (Context a)
+derive newtype instance Eq (Context a)
+derive newtype instance Ord (Context a)
 derive instance Functor Context
 
 instance Semigroup (Context a) where
@@ -39,8 +39,8 @@ fromArray = Context <<< List.fromFoldable <<< Array.reverse
 push :: forall a. Element a -> Context a -> Context a
 push element (Context context) = Context (element : context)
 
-discardUntil :: forall a. Context a -> Element a -> Context a
-discardUntil (Context context) element =
+discardUntil :: forall a. Element a -> Context a -> Context a
+discardUntil element (Context context) =
   Context $ fold $ List.tail $ _.rest $ List.span (_ /= element) context
 
 splitAtUnsolved :: forall a. Int -> Context a -> Maybe { before :: Context a, after :: Context a }

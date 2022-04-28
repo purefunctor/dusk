@@ -4,23 +4,31 @@ import Prelude
 import Prim hiding (Type)
 
 import Control.Monad.Error.Class (class MonadError, throwError)
-import Control.Monad.State.Class (class MonadState, gets, modify_)
-import Data.Lens (preview, review, view)
+import Control.Monad.State.Class (class MonadState)
+import Data.Lens (preview, review, use, view, (%=), (.=))
 import Data.Maybe (Maybe(..), isNothing)
 import Data.Traversable (traverse_)
 import Dusk.Ast.Expr (Expr)
+import Dusk.Ast.Expr as Expr
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
-import Dusk.Tc.Context (Context)
+import Dusk.Environment (_atNames)
 import Dusk.Tc.Context as Context
-import Dusk.Tc.Monad (CheckState, fresh, withTypeVariableInContext, withUnsolvedTypeInContext)
-import Partial.Unsafe (unsafeCrashWith)
+import Dusk.Tc.Monad
+  ( CheckState
+  , _context
+  , _environment
+  , fresh
+  , splitContextAtUnsolved
+  , withNameInEnvironment
+  , withTypeVariableInContext
+  , withUnsolvedTypeInContext
+  )
 
 subsumes
   :: forall a m
    . MonadState (CheckState a) m
   => MonadError String m
-  => Eq a
   => Type a
   -> Type a
   -> m Unit
@@ -34,7 +42,7 @@ subsumes = case _, _ of
     | Just f1 <- preview Type._Function t1
     , Just f2 <- preview Type._Function t2 -> do
         subsumes f2.argument f1.argument
-        context <- gets _.context
+        context <- use _context
         subsumes (Context.apply context f1.result) (Context.apply context f2.result)
 
   t1, Type.Forall { ann, name, type_ } -> do
@@ -58,6 +66,7 @@ unify
   -> Type a
   -> m Unit
 unify = case _, _ of
+
   Type.Forall f1, Type.Forall f2 -> do
     name' <- append "t" <<< show <$> fresh
     let
@@ -111,13 +120,13 @@ unify = case _, _ of
   where
   variableInScopeCheck :: String -> m Unit
   variableInScopeCheck name = do
-    context <- gets _.context
+    context <- use _context
     when (isNothing $ Context.lookupVariable name context) do
       throwError "unify: variable not in scope"
 
   unsolvedInScopeCheck :: Int -> m Unit
   unsolvedInScopeCheck name = do
-    context <- gets _.context
+    context <- use _context
     when (isNothing $ Context.lookupUnsolved name context) do
       throwError "unify: variable not in scope"
 
@@ -154,14 +163,15 @@ solve
   -> Type a
   -> m Unit
 solve u@{ name: a } t = do
-  { before: context, after: context' } <- gets _.context >>= splitAtUnsolved a
+  -- { before: context, after: context' } <- splitContextAtUnsolved a
+  contexts <- splitContextAtUnsolved a
 
   let
     insertToContext = case _ of
       Type.Forall _ ->
         throwError "solve: impredicativity error"
       m -> do
-        modify_ (_ { context = Context.push (Context.Solved a Nothing m) context <> context' })
+        _context .= Context.push (Context.Solved a Nothing m) contexts.before <> contexts.after
 
   case t of
     -- InstAll: Γ[a^] ⊢ ...
@@ -179,15 +189,16 @@ solve u@{ name: a } t = do
       insertToContext t
 
     Type.Unsolved { name: b } -> do
-      case Context.splitAtUnsolved b context' of
+      case Context.splitAtUnsolved b contexts.after of
         -- InstReach:  Γ[a^][b^] ⊢ Γ[a^][b^ = a^]
-        Just { before: context'', after: context''' } ->
+        Just contexts' ->
           let
-            context1 =
-              Context.push (Context.Solved b Nothing $ Type.Unsolved u) context'' <> context'''
-            context0 = Context.push (Context.Unsolved a Nothing) context <> context'
+            context = Context.push (Context.Unsolved a Nothing) contexts.before
+              <> contexts.after
+            context' = Context.push (Context.Solved b Nothing $ Type.Unsolved u) contexts'.before
+              <> contexts'.after
           in
-            modify_ (_ { context = context0 <> context1 })
+            _context .= context <> context'
         -- InstSolve:  Γ[a^] ⊢ Γ[a^ = t]
         Nothing ->
           insertToContext t
@@ -204,7 +215,7 @@ solve u@{ name: a } t = do
       let
         a1 = { ann: f.ann0, name: u1 }
         a2 = { ann: f.ann1, name: u2 }
-        context_ = Context.fromArray
+        between = Context.fromArray
           [ Context.Unsolved u2 Nothing
           , Context.Unsolved u1 Nothing
           , Context.Solved a Nothing
@@ -215,10 +226,10 @@ solve u@{ name: a } t = do
                   }
           ]
 
-      modify_ $ _ { context = context <> context_ <> context' }
+      _context .= contexts.before <> between <> contexts.after
       solve a1 f.argument
 
-      contextN <- gets _.context
+      contextN <- use _context
       solve a2 (Context.apply contextN f.result)
 
     Type.Application { ann, function, argument } -> do
@@ -228,7 +239,7 @@ solve u@{ name: a } t = do
       let
         a1 = { ann: view Type.annForType function, name: u1 }
         a2 = { ann: view Type.annForType argument, name: u2 }
-        context_ = Context.fromArray
+        between = Context.fromArray
           [ Context.Unsolved u2 Nothing
           , Context.Unsolved u1 Nothing
           , Context.Solved a Nothing
@@ -239,10 +250,10 @@ solve u@{ name: a } t = do
                   }
           ]
 
-      modify_ $ _ { context = context <> context_ <> context' }
+      _context .= contexts.before <> between <> contexts.after
       solve a1 function
 
-      contextN <- gets _.context
+      contextN <- use _context
       solve a2 (Context.apply contextN argument)
 
     Type.KindApplication { ann, function, argument } -> do
@@ -252,7 +263,7 @@ solve u@{ name: a } t = do
       let
         a1 = { ann: view Type.annForType function, name: u1 }
         a2 = { ann: view Type.annForType argument, name: u2 }
-        context_ = Context.fromArray
+        between = Context.fromArray
           [ Context.Unsolved u2 Nothing
           , Context.Unsolved u1 Nothing
           , Context.Solved a Nothing
@@ -263,24 +274,101 @@ solve u@{ name: a } t = do
                   }
           ]
 
-      modify_ $ _ { context = context <> context_ <> context' }
+      _context .= contexts.before <> between <> contexts.after
       solve a1 function
 
-      contextN <- gets _.context
+      contextN <- use _context
       solve a2 (Context.apply contextN argument)
-  where
-  splitAtUnsolved :: Int -> Context a -> m { before :: Context a, after :: Context a }
-  splitAtUnsolved unsolved context =
-    case Context.splitAtUnsolved unsolved context of
-      Just fields -> pure fields
-      Nothing -> throwError "solve: could not split context"
 
 check
   :: forall a m. MonadState (CheckState a) m => MonadError String m => Expr a -> Type a -> m Unit
-check _ _ = pure unit
+check = case _, _ of
+
+  Expr.Literal _ (Expr.Char _), Type.Constructor { name: "Char" } ->
+    pure unit
+  Expr.Literal _ (Expr.String _), Type.Constructor { name: "String" } ->
+    pure unit
+  Expr.Literal _ (Expr.Int _), Type.Constructor { name: "Int" } ->
+    pure unit
+  Expr.Literal _ (Expr.Float _), Type.Constructor { name: "Float" } ->
+    pure unit
+
+  Expr.Literal _ (Expr.Array _), _ ->
+    throwError "check: unimplemented"
+  Expr.Literal _ (Expr.Object _), _ ->
+    throwError "check: unimplemented"
+
+  Expr.Lambda _ argument expression, t
+    | Just f <- preview Type._Function t ->
+        withNameInEnvironment argument f.argument $ check expression f.result
+
+  e, Type.Forall { ann, name, type_ } -> do
+    name' <- append "t" <<< show <$> fresh
+    withTypeVariableInContext name' do
+      check e $ Type.substituteType name (Type.Skolem { ann, name: name' }) type_
+
+  e, t -> do
+    t' <- infer e
+    context <- use _context
+    subsumes (Context.apply context t') (Context.apply context t)
 
 infer :: forall a m. MonadState (CheckState a) m => MonadError String m => Expr a -> m (Type a)
-infer _ = unsafeCrashWith "infer: unimplemented"
+infer = case _ of
+
+  Expr.Literal ann literal -> case literal of
+    Expr.Char _ ->
+      pure $ Type.Constructor { ann, name: "Char" }
+    Expr.String _ ->
+      pure $ Type.Constructor { ann, name: "String" }
+    Expr.Int _ ->
+      pure $ Type.Constructor { ann, name: "Int" }
+    Expr.Float _ ->
+      pure $ Type.Constructor { ann, name: "Float" }
+    Expr.Array _ ->
+      throwError "infer: unimplemented"
+    Expr.Object _ ->
+      throwError "infer: unimplemented"
+
+  Expr.Variable _ name -> do
+    mType <- use (_environment <<< _atNames name)
+    case mType of
+      Just type_ ->
+        pure type_
+      Nothing ->
+        throwError "infer: variable not in environment"
+
+  Expr.Lambda ann argument expression -> do
+    u1 <- fresh
+    u2 <- fresh
+
+    _context %= flip append
+      ( Context.fromArray
+          [ Context.Unsolved u1 Nothing
+          , Context.Unsolved u2 Nothing
+          ]
+      )
+
+    let
+      t1 = Type.Unsolved { ann, name: u1 }
+      t2 = Type.Unsolved { ann, name: u2 }
+
+    withNameInEnvironment argument t1 $ check expression t2
+
+    pure $ review Type._Function
+      { ann0: ann
+      , ann1: ann
+      , ann2: ann
+      , argument: t1
+      , result: t2
+      }
+
+  Expr.Apply _ function argument -> do
+    functionType <- infer function
+    context <- use _context
+    inferApplication (Context.apply context functionType) argument
+
+  Expr.Annotate _ expression type_ ->
+    check expression type_ $> type_
 
 inferApplication
   :: forall a m
@@ -289,4 +377,42 @@ inferApplication
   => Type a
   -> Expr a
   -> m (Type a)
-inferApplication _ _ = unsafeCrashWith "inferApplication: unimplemented"
+inferApplication = case _, _ of
+
+  Type.Forall { ann, name, type_ }, e -> do
+    name' <- fresh
+    _context %= Context.push (Context.Unsolved name' Nothing)
+    inferApplication (Type.substituteType name (Type.Unsolved { ann, name: name' }) type_) e
+
+  Type.Unsolved { ann, name }, _ -> do
+    contexts <- splitContextAtUnsolved name
+
+    u1 <- fresh
+    u2 <- fresh
+
+    let
+      t1 = Type.Unsolved { ann, name: u1 }
+      t2 = Type.Unsolved { ann, name: u2 }
+      between = Context.fromArray
+        [ Context.Unsolved u2 Nothing
+        , Context.Unsolved u1 Nothing
+        , Context.Solved name Nothing $
+            review Type._Function
+              { ann0: ann
+              , ann1: ann
+              , ann2: ann
+              , argument: t1
+              , result: t2
+              }
+        ]
+
+    _context .= contexts.before <> between <> contexts.after
+
+    pure t2
+
+  t, e
+    | Just f <- preview Type._Function t ->
+        check e f.argument $> f.result
+
+  _, _ ->
+    throwError "inferApplication: cannot apply"
