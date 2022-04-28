@@ -5,7 +5,7 @@ import Prim hiding (Type)
 
 import Data.Array as Array
 import Data.Foldable (fold, foldl)
-import Data.List (List, (:))
+import Data.List (List(..), (:))
 import Data.List as List
 import Data.Maybe (Maybe(..))
 import Dusk.Ast.Type (Type)
@@ -27,6 +27,12 @@ derive newtype instance Eq a => Eq (Context a)
 derive newtype instance Ord a => Ord (Context a)
 derive instance Functor Context
 
+instance Semigroup (Context a) where
+  append (Context before) (Context after) = Context (after <> before)
+
+instance Monoid (Context a) where
+  mempty = Context Nil
+
 fromArray :: forall a. Array (Element a) -> Context a
 fromArray = Context <<< List.fromFoldable <<< Array.reverse
 
@@ -36,6 +42,21 @@ push element (Context context) = Context (element : context)
 discardUntil :: forall a. Context a -> Element a -> Context a
 discardUntil (Context context) element =
   Context $ fold $ List.tail $ _.rest $ List.span (_ /= element) context
+
+splitAtUnsolved :: forall a. Int -> Context a -> Maybe { before :: Context a, after :: Context a }
+splitAtUnsolved unsolved (Context context) =
+  let
+    { init, rest } = List.span go context
+  in
+    case rest of
+      Nil -> Nothing
+      Cons _ rest -> Just
+        { before: Context $ rest
+        , after: Context $ init
+        }
+  where
+  go (Unsolved unsolved' _) | unsolved == unsolved' = false
+  go _ = true
 
 apply :: forall a. Context a -> Type a -> Type a
 apply (Context context) = flip (foldl go) context
