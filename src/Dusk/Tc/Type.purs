@@ -228,8 +228,8 @@ solve u@{ name: a } t = do
       u2 <- fresh
 
       let
-        a1 = { ann: view Type.annForType function, name: u1 }
-        a2 = { ann: view Type.annForType argument, name: u2 }
+        a1 = { ann: view Type._ann function, name: u1 }
+        a2 = { ann: view Type._ann argument, name: u2 }
         between = Context.fromArray
           [ Context.Unsolved u2 Nothing
           , Context.Unsolved u1 Nothing
@@ -252,8 +252,8 @@ solve u@{ name: a } t = do
       u2 <- fresh
 
       let
-        a1 = { ann: view Type.annForType function, name: u1 }
-        a2 = { ann: view Type.annForType argument, name: u2 }
+        a1 = { ann: view Type._ann function, name: u1 }
+        a2 = { ann: view Type._ann argument, name: u2 }
         between = Context.fromArray
           [ Context.Unsolved u2 Nothing
           , Context.Unsolved u1 Nothing

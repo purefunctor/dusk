@@ -4,7 +4,7 @@ import Prelude hiding (apply)
 import Prim hiding (Type)
 
 import Data.Foldable (foldMap)
-import Data.Lens (Getter', to)
+import Data.Lens (Lens', lens)
 import Data.Lens.Prism (Prism', prism')
 import Data.Map (Map)
 import Data.Map as Map
@@ -198,15 +198,26 @@ substituteTypes = go Set.empty
         , argument = go seen repl argument
         }
 
-annForType :: forall a. Getter' (Type a) a
-annForType = to case _ of
-  Forall { ann } -> ann
-  Variable { ann } -> ann
-  Skolem { ann } -> ann
-  Unsolved { ann } -> ann
-  Constructor { ann } -> ann
-  Application { ann } -> ann
-  KindApplication { ann } -> ann
+_ann :: forall a. Lens' (Type a) a
+_ann = lens u m
+  where
+  u = case _ of
+    Forall { ann } -> ann
+    Variable { ann } -> ann
+    Skolem { ann } -> ann
+    Unsolved { ann } -> ann
+    Constructor { ann } -> ann
+    Application { ann } -> ann
+    KindApplication { ann } -> ann
+
+  m type_ ann = case type_ of
+    Forall f -> Forall $ f { ann = ann }
+    Variable f -> Variable $ f { ann = ann }
+    Skolem f -> Skolem $ f { ann = ann }
+    Unsolved f -> Unsolved $ f { ann = ann }
+    Constructor f -> Constructor $ f { ann = ann }
+    Application f -> Application $ f { ann = ann }
+    KindApplication f -> KindApplication $ f { ann = ann }
 
 _Function
   :: forall a
