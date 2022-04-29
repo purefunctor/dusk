@@ -3,11 +3,12 @@ module Dusk.Tc.Context where
 import Prelude
 import Prim hiding (Type)
 
+import Control.Monad.Error.Class (class MonadError, throwError)
 import Data.Array as Array
 import Data.Foldable (fold, foldl)
 import Data.List (List(..), (:))
 import Data.List as List
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), isJust)
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 
@@ -76,3 +77,32 @@ lookupUnsolved name (Context context) = List.findMap go context
   go (Unsolved name' kind_) | name == name' = Just { name, kind_ }
   go _ = Nothing
 
+wellFormedType :: forall a m. MonadError String m => Context a -> Type a -> m Unit
+wellFormedType = go
+  where
+  go context = case _ of
+    Type.Forall { name, kind_, type_: type_' } ->
+      go (push (Variable name kind_) context) type_'
+    Type.Variable { name } ->
+      if isJust $ lookupVariable name context then
+        pure unit
+      else
+        throwError "syntactic variable not in scope"
+    Type.Skolem { name } ->
+      if isJust $ lookupVariable name context then
+        pure unit
+      else
+        throwError "skolem variable not in scope"
+    Type.Unsolved { name } ->
+      if isJust $ lookupUnsolved name context then
+        pure unit
+      else
+        throwError "unsolved variable not in scope"
+    Type.Constructor _ ->
+      pure unit
+    Type.Application { function, argument } -> do
+      go context function
+      go context argument
+    Type.KindApplication { function, argument } -> do
+      go context function
+      go context argument

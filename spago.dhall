@@ -5,6 +5,7 @@
   , "console"
   , "debug"
   , "effect"
+  , "either"
   , "foldable-traversable"
   , "lists"
   , "maybe"

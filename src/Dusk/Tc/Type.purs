@@ -163,34 +163,28 @@ solve
   -> Type a
   -> m Unit
 solve u@{ name: a } t = do
-  -- { before: context, after: context' } <- splitContextAtUnsolved a
   contexts <- splitContextAtUnsolved a
 
   let
-    insertToContext = case _ of
-      Type.Forall _ ->
-        throwError "solve: impredicativity error"
-      m -> do
-        _context .= Context.push (Context.Solved a Nothing m) contexts.before <> contexts.after
+    -- Γ[a^] ⊢ Γ[a^ = t]
+    insertToContext m = do
+      Context.wellFormedType contexts.before m
+      _context .= Context.push (Context.Solved a Nothing m) contexts.before <> contexts.after
 
   case t of
-    -- InstAll: Γ[a^] ⊢ ...
-    Type.Forall { ann, name, type_ } -> do
-      name' <- append "t" <<< show <$> fresh
-      withTypeVariableInContext name' do
-        solve u $ Type.substituteType name (Type.Skolem { ann, name: name' }) type_
 
-    -- InstSolve:  Γ[a^] ⊢ Γ[a^ = t]
+    Type.Forall _ -> do
+      throwError "solve: impredicativity error"
+
     Type.Variable _ ->
       insertToContext t
 
-    -- InstSolve:  Γ[a^] ⊢ Γ[a^ = t]
     Type.Skolem _ ->
       insertToContext t
 
     Type.Unsolved { name: b } -> do
       case Context.splitAtUnsolved b contexts.after of
-        -- InstReach:  Γ[a^][b^] ⊢ Γ[a^][b^ = a^]
+        -- Γ[a^][b^] ⊢ Γ[a^][b^ = a^]
         Just contexts' ->
           let
             context = Context.push (Context.Unsolved a Nothing) contexts.before
@@ -199,15 +193,12 @@ solve u@{ name: a } t = do
               <> contexts'.after
           in
             _context .= context <> context'
-        -- InstSolve:  Γ[a^] ⊢ Γ[a^ = t]
         Nothing ->
           insertToContext t
 
-    -- InstSolve:  Γ[a^] ⊢ Γ[a^ = t]
     Type.Constructor _ ->
       insertToContext t
 
-    -- InstArr: Γ[a^] ⊢ ...
     _ | Just f <- preview Type._Function t -> do
       u1 <- fresh
       u2 <- fresh
