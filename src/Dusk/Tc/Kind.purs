@@ -67,65 +67,43 @@ infer = case _ of
       Nothing ->
         throwError "infer: unknown constructor"
 
-  Type.Forall fields@{ ann, name, type_, kind_: Just kind_ } -> do
-    kind_' <- check kind_ (Type.Constructor { ann, name: "Type" })
-    let jKind_' = Just kind_'
-
-    _context %= Context.push (Context.Variable name jKind_')
-    type_' <- check type_ (Type.Constructor { ann, name: "Type" })
-
-    use (_context <<< _splitAtVariable name jKind_') >>= case _ of
-      Just { before: context2, after: context3 } -> do
-        _context .= context2 <> Context.gatherUnsolved context3
-
-        let
-          t = Type.Forall $ fields
-            { kind_ = jKind_'
-            , type_ = Context.apply context3 type_'
-            }
-          k = Type.Constructor
-            { ann
-            , name: "Type"
-            }
-
-        pure $ t /\ k
-
-      Nothing ->
-        throwError "infer: could not split at variable"
-
-  Type.Forall fields@{ ann, name, type_, kind_: Nothing } -> do
-    name' <- fresh
+  Type.Forall fields@{ ann, name, type_, kind_: mKind } ->
     let
-      kind_' = Type.Unsolved { ann, name: name' }
-      jKind_' = Just kind_'
-
-    _context %= flip append
-      ( Context.fromArray
-          [ Context.Unsolved name' $ Just $ Type.Constructor { ann, name: "Type" }
-          , Context.Variable name $ jKind_'
-          ]
-      )
-
-    type_' <- check type_ (Type.Constructor { ann, name: "Type" })
-
-    use (_context <<< _splitAtVariable name jKind_') >>= case _ of
-      Just { before: context2, after: context3 } -> do
-        _context .= context2 <> Context.gatherUnsolved context3
-
-        let
-          t = Type.Forall $ fields
-            { kind_ = jKind_'
-            , type_ = Context.apply context3 type_'
-            }
-          k = Type.Constructor
-            { ann
-            , name: "Type"
-            }
-
-        pure $ t /\ k
-
-      Nothing ->
-        throwError "infer: could not split variable"
+      inferForall :: Type a -> Type a -> m (Type a /\ Type a)
+      inferForall kind_' type_' =
+        use (_context <<< _splitAtVariable name (Just kind_')) >>= case _ of
+          Just { before: context2, after: context3 } -> do
+            _context .= context2 <> Context.gatherUnsolved context3
+            let
+              t = Type.Forall $ fields
+                { kind_ = Just kind_'
+                , type_ = Context.apply context3 type_'
+                }
+              k = Type.Constructor
+                { ann
+                , name: "Type"
+                }
+            pure $ t /\ k
+          Nothing ->
+            throwError "infer: could not split context"
+    in
+      case mKind of
+        Just kind_ -> do
+          kind_' <- check kind_ (Type.Constructor { ann, name: "Type" })
+          _context %= Context.push (Context.Variable name (Just kind_'))
+          type_' <- check type_ (Type.Constructor { ann, name: "Type" })
+          inferForall kind_' type_'
+        Nothing -> do
+          name' <- fresh
+          let kind_' = Type.Unsolved { ann, name: name' }
+          _context %= flip append
+            ( Context.fromArray
+              [ Context.Unsolved name' $ Just $ Type.Constructor { ann, name: "Type" }
+              , Context.Variable name $ Just $ kind_'
+              ]
+            )
+          type_' <- check type_ (Type.Constructor { ann, name: "Type" })
+          inferForall kind_' type_'
 
   t@(Type.Variable { name }) -> do
     use (_context <<< _lookupVariable name) >>= case _ of
