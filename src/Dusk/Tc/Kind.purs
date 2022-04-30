@@ -5,7 +5,7 @@ import Prim hiding (Type)
 
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.State.Class (class MonadState)
-import Data.Lens (use, (%=), (.=))
+import Data.Lens (preview, use, (%=), (.=))
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested (type (/\), (/\))
 import Dusk.Ast.Type (Type)
@@ -164,8 +164,52 @@ elaborate
   => Type a
   -> m (Type a)
 elaborate = case _ of
-  _ ->
-    throwError "elaborate: not implemented"
+
+  Type.Constructor { name } -> do
+    use (_environment <<< _atTypes name) >>= case _ of
+      Just k ->
+        pure k
+      Nothing ->
+        throwError "elaborate: unknown constructor"
+
+  Type.Forall { ann } ->
+    pure $ Type.Constructor { ann, name: "Type" }
+
+  Type.Variable { name } ->
+    use (_context <<< _lookupVariable name) >>= case _ of
+      Just { kind_: Just k } ->
+        pure k
+      _ ->
+        throwError "elaborate: unknown variable"
+
+  Type.Skolem { name } ->
+    use (_context <<< _lookupVariable name) >>= case _ of
+      Just { kind_: Just k } ->
+        pure k
+      _ ->
+        throwError "elaborate: unknown variable"
+
+  Type.Unsolved { name } ->
+    use (_context <<< _lookupUnsolved name) >>= case _ of
+      Just { kind_: Just k } ->
+        pure k
+      _ ->
+        throwError "elaborate: unknown unsolved"
+
+  Type.Application { function } -> do
+    elaborate function >>= case _ of
+      functionKind | Just { result } <- preview Type._Function functionKind ->
+        pure result
+      _ ->
+        throwError "elaborate: must be a function"
+
+  Type.KindApplication { function, argument } -> do
+    elaborate function >>= case _ of
+      Type.Forall { name, type_ } -> do
+        context <- use _context
+        pure $ Type.substituteType name (Context.apply context argument) type_
+      _ ->
+        throwError "elaborate: must be a forall"
 
 subsumes
   :: forall a m
