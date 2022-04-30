@@ -11,7 +11,7 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Dusk.Ast.Type (Type)
 import Dusk.Environment (Environment, _names, emptyEnvironment)
-import Dusk.Tc.Context (Context)
+import Dusk.Tc.Context (Context, UnsolvedSplit)
 import Dusk.Tc.Context as Context
 
 type CheckState a =
@@ -44,7 +44,7 @@ splitContextAtUnsolved
    . MonadState (CheckState a) m
   => MonadError String m
   => Int
-  -> m { before :: Context a, after :: Context a }
+  -> m (UnsolvedSplit a)
 splitContextAtUnsolved unsolved = do
   context <- use _context
   case Context.splitAtUnsolved unsolved context of

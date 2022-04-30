@@ -1,16 +1,19 @@
 module Dusk.Tc.Kind where
 
-import Data.Lens
 import Prelude
 import Prim hiding (Type)
 
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.State.Class (class MonadState)
+import Data.Lens (use, (%=), (.=))
+import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested (type (/\), (/\))
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
+import Dusk.Environment (_atTypes)
+import Dusk.Tc.Context (_lookupUnsolved, _lookupVariable, _splitAtVariable)
 import Dusk.Tc.Context as Context
-import Dusk.Tc.Monad (CheckState, _context, fresh)
+import Dusk.Tc.Monad (CheckState, _context, _environment, fresh)
 
 instantiate
   :: forall a m
@@ -56,8 +59,114 @@ infer
   => Type a
   -> m (Type a /\ Type a)
 infer = case _ of
-  _ ->
-    throwError "infer: not implemented"
+
+  t@(Type.Constructor { name }) -> do
+    use (_environment <<< _atTypes name) >>= case _ of
+      Just k ->
+        pure $ t /\ k
+      Nothing ->
+        throwError "infer: unknown constructor"
+
+  Type.Forall fields@{ ann, name, type_, kind_: Just kind_ } -> do
+    kind_' <- check kind_ (Type.Constructor { ann, name: "Type" })
+    let jKind_' = Just kind_'
+
+    _context %= Context.push (Context.Variable name jKind_')
+    type_' <- check type_ (Type.Constructor { ann, name: "Type" })
+
+    use (_context <<< _splitAtVariable name jKind_') >>= case _ of
+      Just { before: context2, after: context3 } -> do
+        _context .= context2 <> Context.gatherUnsolved context3
+
+        let
+          t = Type.Forall $ fields
+            { kind_ = jKind_'
+            , type_ = Context.apply context3 type_'
+            }
+          k = Type.Constructor
+            { ann
+            , name: "Type"
+            }
+
+        pure $ t /\ k
+
+      Nothing ->
+        throwError "infer: could not split at variable"
+
+  Type.Forall fields@{ ann, name, type_, kind_: Nothing } -> do
+    name' <- fresh
+    let
+      kind_' = Type.Unsolved { ann, name: name' }
+      jKind_' = Just kind_'
+
+    _context %= flip append
+      ( Context.fromArray
+          [ Context.Unsolved name' $ Just $ Type.Constructor { ann, name: "Type" }
+          , Context.Variable name $ jKind_'
+          ]
+      )
+
+    type_' <- check type_ (Type.Constructor { ann, name: "Type" })
+
+    use (_context <<< _splitAtVariable name jKind_') >>= case _ of
+      Just { before: context2, after: context3 } -> do
+        _context .= context2 <> Context.gatherUnsolved context3
+
+        let
+          t = Type.Forall $ fields
+            { kind_ = jKind_'
+            , type_ = Context.apply context3 type_'
+            }
+          k = Type.Constructor
+            { ann
+            , name: "Type"
+            }
+
+        pure $ t /\ k
+
+      Nothing ->
+        throwError "infer: could not split variable"
+
+  t@(Type.Variable { name }) -> do
+    use (_context <<< _lookupVariable name) >>= case _ of
+      Just { kind_: Just k } ->
+        pure $ t /\ k
+      _ ->
+        throwError "infer: unknown variable"
+
+  t@(Type.Skolem { name }) -> do
+    use (_context <<< _lookupVariable name) >>= case _ of
+      Just { kind_: Just k } ->
+        pure $ t /\ k
+      _ ->
+        throwError "infer: unknown variable"
+
+  t@(Type.Unsolved { name }) -> do
+    use (_context <<< _lookupUnsolved name) >>= case _ of
+      Just { kind_: Just k } ->
+        pure $ t /\ k
+      _ ->
+        throwError "infer: unknown unsolved"
+
+  Type.Application { function: t1, argument: t2 } -> do
+    (t1' /\ k1') <- infer t1
+    context <- use _context
+    inferApplication (t1' /\ Context.apply context k1') t2
+
+  Type.KindApplication { ann, function: t1, argument: t2 } -> do
+    (t1' /\ k1') <- infer t1
+    context <- use _context
+    case Context.apply context k1' of
+      Type.Forall { name, type_, kind_: Just kind_ } -> do
+        t2' <- check t2 kind_
+
+        let
+          t1'' = Type.KindApplication { ann, function: t1', argument: t2' }
+          t2'' = Type.substituteType name t2' type_
+
+        pure (t1'' /\ t2'')
+      _ ->
+        throwError "infer: invalid kind application"
 
 inferApplication
   :: forall a m

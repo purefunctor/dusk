@@ -1,5 +1,6 @@
 module Dusk.Tc.Context where
 
+import Data.Lens
 import Prelude
 import Prim hiding (Type)
 
@@ -44,20 +45,47 @@ discardUntil :: forall a. Element a -> Context a -> Context a
 discardUntil element (Context context) =
   Context $ fold $ List.tail $ _.rest $ List.span (_ /= element) context
 
-splitAtUnsolved :: forall a. Int -> Context a -> Maybe { before :: Context a, after :: Context a }
-splitAtUnsolved unsolved (Context context) =
-  let
-    { init, rest } = List.span go context
-  in
-    case rest of
-      Nil -> Nothing
-      Cons _ rest -> Just
-        { before: Context $ rest
-        , after: Context $ init
-        }
+type UnsolvedSplit a =
+  { before :: Context a
+  , name :: Int
+  , kind_ :: Maybe (Type a)
+  , after :: Context a
+  }
+
+splitAtUnsolved :: forall a. Int -> Context a -> Maybe (UnsolvedSplit a)
+splitAtUnsolved name (Context context) = go Nil context
   where
-  go (Unsolved unsolved' _) | unsolved == unsolved' = false
-  go _ = true
+  go after = case _ of
+    Nil ->
+      Nothing
+    Cons (Unsolved name' kind_) before
+      | name == name' -> Just
+          { before: Context $ before
+          , name
+          , kind_
+          , after: Context $ List.reverse after
+          }
+    Cons current before ->
+      go (current : after) before
+
+type VariableSplit a =
+  { before :: Context a
+  , after :: Context a
+  }
+
+splitAtVariable :: forall a. String -> Maybe (Type a) -> Context a -> Maybe (VariableSplit a)
+splitAtVariable name kind_ (Context context) = go Nil context
+  where
+  go after = case _ of
+    Nil ->
+      Nothing
+    Cons (Variable name' kind_') before
+      | name == name' && kind_ == kind_' -> Just
+          { before: Context $ before
+          , after: Context $ List.reverse after
+          }
+    Cons current before ->
+      go (current : after) before
 
 apply :: forall a. Context a -> Type a -> Type a
 apply (Context context) = flip (foldl go) context
@@ -70,6 +98,12 @@ lookupVariable name (Context context) = List.findMap go context
   where
   go (Variable name' kind_) | name == name' = Just { name, kind_ }
   go _ = Nothing
+
+gatherUnsolved :: forall a. Context a -> Context a
+gatherUnsolved (Context context) = Context (List.filter go context)
+  where
+  go (Unsolved _ _) = true
+  go _ = false
 
 lookupUnsolved :: forall a. Int -> Context a -> Maybe { name :: Int, kind_ :: Maybe (Type a) }
 lookupUnsolved name (Context context) = List.findMap go context
@@ -106,3 +140,21 @@ wellFormedType = go
     Type.KindApplication { function, argument } -> do
       go context function
       go context argument
+
+_lookupVariable
+  :: forall a. String -> Getter' (Context a) (Maybe { name :: String, kind_ :: Maybe (Type a) })
+_lookupVariable = to <<< lookupVariable
+
+_splitAtVariable
+  :: forall a. String -> Maybe (Type a) -> Getter' (Context a) (Maybe (VariableSplit a))
+_splitAtVariable name kind_ = to $ splitAtVariable name kind_
+
+_gatherUnsolved :: forall a. Getter' (Context a) (Context a)
+_gatherUnsolved = to gatherUnsolved
+
+_lookupUnsolved
+  :: forall a. Int -> Getter' (Context a) (Maybe { name :: Int, kind_ :: Maybe (Type a) })
+_lookupUnsolved = to <<< lookupUnsolved
+
+_splitAtUnsolved :: forall a. Int -> Getter' (Context a) (Maybe (UnsolvedSplit a))
+_splitAtUnsolved = to <<< splitAtUnsolved
