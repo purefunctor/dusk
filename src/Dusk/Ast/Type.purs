@@ -198,6 +198,13 @@ substituteTypes = go Set.empty
         , argument = go seen repl argument
         }
 
+isMonoType :: forall a. Type a -> Boolean
+isMonoType = case _ of
+  Forall _ ->
+    false
+  _ ->
+    true
+
 _ann :: forall a. Lens' (Type a) a
 _ann = lens u m
   where
