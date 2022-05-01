@@ -71,20 +71,21 @@ infer = case _ of
     let
       inferForall :: Type a -> Type a -> m (Type a /\ Type a)
       inferForall kind_' type_' =
-        use (_context <<< _splitAtVariable name (Just kind_')) >>= case _ of
-          Just { before: context2, after: context3 } -> do
-            _context .= context2 <> Context.gatherUnsolved context3
-            let
-              t = Type.Forall $ fields
-                { kind_ = Just kind_'
-                , type_ = Context.apply context3 type_'
-                }
-              k = Type.Constructor
-                { ann
-                , name: "Type"
-                }
-            pure $ t /\ k
-          Nothing ->
+        use (_context <<< _splitAtVariable name) >>= case _ of
+          Just { before: context2, kind_: Just kind_'', after: context3 }
+            | kind_' == kind_'' -> do
+              _context .= context2 <> Context.gatherUnsolved context3
+              let
+                t = Type.Forall $ fields
+                  { kind_ = Just kind_'
+                  , type_ = Context.apply context3 type_'
+                  }
+                k = Type.Constructor
+                  { ann
+                  , name: "Type"
+                  }
+              pure $ t /\ k
+          _ ->
             throwError "infer: could not split context"
     in
       case mKind of

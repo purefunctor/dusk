@@ -1,12 +1,12 @@
 module Dusk.Tc.Context where
 
-import Data.Lens
 import Prelude
 import Prim hiding (Type)
 
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Data.Array as Array
 import Data.Foldable (fold, foldl)
+import Data.Lens (Getter', to)
 import Data.List (List(..), (:))
 import Data.List as List
 import Data.Maybe (Maybe(..), isJust)
@@ -47,7 +47,6 @@ discardUntil element (Context context) =
 
 type UnsolvedSplit a =
   { before :: Context a
-  , name :: Int
   , kind_ :: Maybe (Type a)
   , after :: Context a
   }
@@ -61,7 +60,6 @@ splitAtUnsolved name (Context context) = go Nil context
     Cons (Unsolved name' kind_) before
       | name == name' -> Just
           { before: Context $ before
-          , name
           , kind_
           , after: Context $ List.reverse after
           }
@@ -70,18 +68,20 @@ splitAtUnsolved name (Context context) = go Nil context
 
 type VariableSplit a =
   { before :: Context a
+  , kind_ :: Maybe (Type a)
   , after :: Context a
   }
 
-splitAtVariable :: forall a. String -> Maybe (Type a) -> Context a -> Maybe (VariableSplit a)
-splitAtVariable name kind_ (Context context) = go Nil context
+splitAtVariable :: forall a. String -> Context a -> Maybe (VariableSplit a)
+splitAtVariable name (Context context) = go Nil context
   where
   go after = case _ of
     Nil ->
       Nothing
-    Cons (Variable name' kind_') before
-      | name == name' && kind_ == kind_' -> Just
+    Cons (Variable name' kind_) before
+      | name == name' -> Just
           { before: Context $ before
+          , kind_
           , after: Context $ List.reverse after
           }
     Cons current before ->
@@ -146,8 +146,8 @@ _lookupVariable
 _lookupVariable = to <<< lookupVariable
 
 _splitAtVariable
-  :: forall a. String -> Maybe (Type a) -> Getter' (Context a) (Maybe (VariableSplit a))
-_splitAtVariable name kind_ = to $ splitAtVariable name kind_
+  :: forall a. String -> Getter' (Context a) (Maybe (VariableSplit a))
+_splitAtVariable = to <<< splitAtVariable
 
 _gatherUnsolved :: forall a. Getter' (Context a) (Context a)
 _gatherUnsolved = to gatherUnsolved
