@@ -11,7 +11,13 @@ import Data.Tuple.Nested (type (/\), (/\))
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 import Dusk.Environment (_atTypes)
-import Dusk.Tc.Context (_lookupUnsolved, _lookupVariable, _splitAtUnsolved, _splitAtVariable)
+import Dusk.Tc.Context
+  ( Context
+  , _lookupUnsolved
+  , _lookupVariable
+  , _splitAtUnsolved
+  , _splitAtVariable
+  )
 import Dusk.Tc.Context as Context
 import Dusk.Tc.Monad (CheckState, _context, _environment, fresh)
 
@@ -74,17 +80,17 @@ infer = case _ of
         use (_context <<< _splitAtVariable name) >>= case _ of
           Just { before: context2, kind_: Just kind_'', after: context3 }
             | kind_' == kind_'' -> do
-              _context .= context2 <> Context.gatherUnsolved context3
-              let
-                t = Type.Forall $ fields
-                  { kind_ = Just kind_'
-                  , type_ = Context.apply context3 type_'
-                  }
-                k = Type.Constructor
-                  { ann
-                  , name: "Type"
-                  }
-              pure $ t /\ k
+                _context .= context2 <> Context.gatherUnsolved context3
+                let
+                  t = Type.Forall $ fields
+                    { kind_ = Just kind_'
+                    , type_ = Context.apply context3 type_'
+                    }
+                  k = Type.Constructor
+                    { ann
+                    , name: "Type"
+                    }
+                pure $ t /\ k
           _ ->
             throwError "infer: could not split context"
     in
@@ -287,9 +293,50 @@ promote
   :: forall a m
    . MonadState (CheckState a) m
   => MonadError String m
-  => Int
+  => { ann :: a, name :: Int }
   -> Type a
   -> m (Type a)
-promote _ = case _ of
-  _ ->
-    throwError "promote: not implemented"
+promote u@{ ann, name: a } = case _ of
+
+  Type.Unsolved { name: b } ->
+    let
+      splitContext :: m { context :: Context a, kind_ :: Type a }
+      splitContext = do
+        use (_context <<< _splitAtUnsolved a) >>= case _ of
+          Just { before: context, after } ->
+            case Context.lookupUnsolved b after of
+              Just { kind_: Just kind_ } ->
+                pure { context, kind_ }
+              _ ->
+                throwError "promote: could not split context"
+          _ ->
+            throwError "promote: could not split context"
+    in
+      do
+        -- Δ[α][β : ρ]
+        { context: delta, kind_: p } <- splitContext
+        -- Δ ⊢ ρ ↝ ρ1 ⊢ Θ[α][β : ρ]
+        _context .= delta
+        p1 <- promote u (Context.apply delta p)
+        -- Θ[α][β : ρ]
+        { context: theta } <- splitContext
+        -- Δ[α][β : ρ] ⊢ β ↝ β1 ⊢ Θ[β1 : ρ1, a][β : ρ = β1]
+        b1 <- fresh
+        let b1' = Type.Unsolved { ann, name: b1 }
+        -- Θ[β1 : ρ1, a][β : ρ = β1]
+        _context .= append theta
+          ( Context.fromArray
+              [ Context.Unsolved b1 (Just p1)
+              , Context.Unsolved a Nothing
+              , Context.Solved b (Just p1) b1'
+              ]
+          )
+        -- β1
+        pure b1'
+
+  t ->
+    use (_context <<< _splitAtUnsolved a) >>= case _ of
+      Just { before } ->
+        Context.wellFormedType before t $> t
+      Nothing ->
+        throwError "prmote: could not split context"
