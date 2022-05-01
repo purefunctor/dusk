@@ -5,13 +5,13 @@ import Prim hiding (Type)
 
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.State.Class (class MonadState)
-import Data.Lens (preview, use, (%=), (.=))
+import Data.Lens (preview, review, use, view, (%=), (.=))
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested (type (/\), (/\))
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 import Dusk.Environment (_atTypes)
-import Dusk.Tc.Context (_lookupUnsolved, _lookupVariable, _splitAtVariable)
+import Dusk.Tc.Context (_lookupUnsolved, _lookupVariable, _splitAtUnsolved, _splitAtVariable)
 import Dusk.Tc.Context as Context
 import Dusk.Tc.Monad (CheckState, _context, _environment, fresh)
 
@@ -98,9 +98,9 @@ infer = case _ of
           let kind_' = Type.Unsolved { ann, name: name' }
           _context %= flip append
             ( Context.fromArray
-              [ Context.Unsolved name' $ Just $ Type.Constructor { ann, name: "Type" }
-              , Context.Variable name $ Just $ kind_'
-              ]
+                [ Context.Unsolved name' $ Just $ Type.Constructor { ann, name: "Type" }
+                , Context.Variable name $ Just $ kind_'
+                ]
             )
           type_' <- check type_ (Type.Constructor { ann, name: "Type" })
           inferForall kind_' type_'
@@ -154,8 +154,57 @@ inferApplication
   -> Type a
   -> m (Type a /\ Type a)
 inferApplication = case _, _ of
+
+  t1 /\ Type.Forall { ann, name, kind_: mKind, type_ }, t2 ->
+    case mKind of
+      Just _ -> do
+        name' <- fresh
+        _context %= Context.push (Context.Unsolved name' mKind)
+        let
+          t1' = Type.KindApplication
+            { ann, function: t1, argument: Type.Unsolved { ann, name: name' } }
+          k1' = Type.substituteType name (Type.Unsolved { ann, name: name' }) type_
+        inferApplication (t1' /\ k1') t2
+      Nothing ->
+        throwError "inferApplication: unkinded forall"
+
+  t1 /\ Type.Unsolved { ann, name }, t2 -> do
+    u1 <- fresh
+    u2 <- fresh
+    let
+      u1' = Type.Unsolved { ann, name: u1 }
+      u2' = Type.Unsolved { ann, name: u2 }
+    use (_context <<< _splitAtUnsolved name) >>= case _ of
+      Just { before, kind_, after } ->
+        let
+          middle = Context.fromArray
+            [ Context.Unsolved u1 $ Just $ Type.Constructor { ann, name: "Type" }
+            , Context.Unsolved u2 $ Just $ Type.Constructor { ann, name: "Type" }
+            , Context.Solved name kind_ $ review Type._Function
+                { ann0: ann
+                , ann1: ann
+                , ann2: ann
+                , argument: u1'
+                , result: u2'
+                }
+            ]
+        in
+          _context .= before <> middle <> after
+      Nothing ->
+        throwError "inferApplication: could not split context"
+    t2' <- check t2 u1'
+    pure $ Type.Application { ann, function: t1, argument: t2' } /\ u2'
+
+  t1 /\ k1, t2 | Just { argument, result } <- preview Type._Function k1 -> do
+    t2' <- check t2 argument
+    context <- use _context
+    let
+      t1' = Type.Application { ann: view Type._ann t1, function: t1, argument: t2' }
+      k1' = Context.apply context result
+    pure $ t1' /\ k1'
+
   (_ /\ _), _ ->
-    throwError "inferApplication: not implemented"
+    throwError "inferApplication: could not apply kind"
 
 elaborate
   :: forall a m
