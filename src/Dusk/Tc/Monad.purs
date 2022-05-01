@@ -68,21 +68,22 @@ withNamesInEnvironment names action = do
   _names' = _environment <<< _names
 
 withTypeVariableInContext
-  :: forall a m r. MonadState (CheckState a) m => String -> m r -> m r
-withTypeVariableInContext name action = do
+  :: forall a m r. MonadState (CheckState a) m => String -> Maybe (Type a) -> m r -> m r
+withTypeVariableInContext name kind_ action = do
   _context %= Context.push element
   result <- action
   _context %= Context.discardUntil element
   pure result
   where
-  element = Context.Variable name Nothing
+  element = Context.Variable name kind_
 
-withUnsolvedTypeInContext :: forall a m r. MonadState (CheckState a) m => Int -> m r -> m r
-withUnsolvedTypeInContext name action = do
+withUnsolvedTypeInContext
+  :: forall a m r. MonadState (CheckState a) m => Int -> Maybe (Type a) -> m r -> m r
+withUnsolvedTypeInContext name kind_ action = do
   _context %= (Context.push element <<< Context.push marker)
   result <- action
   _context %= Context.discardUntil marker
   pure result
   where
   marker = Context.Marker (show name)
-  element = Context.Unsolved name Nothing
+  element = Context.Unsolved name kind_

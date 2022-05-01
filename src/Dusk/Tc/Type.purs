@@ -48,12 +48,12 @@ subsumes = case _, _ of
   t1, Type.Forall { ann, name, type_ } -> do
     name' <- append "t" <<< show <$> fresh
     let t2 = Type.substituteType name (Type.Skolem { ann, name: name' }) type_
-    withTypeVariableInContext name' $ subsumes t1 t2
+    withTypeVariableInContext name' Nothing $ subsumes t1 t2
 
   Type.Forall { ann, name, type_ }, t2 -> do
     name' <- fresh
     let t1 = Type.substituteType name (Type.Unsolved { ann, name: name' }) type_
-    withUnsolvedTypeInContext name' $ subsumes t1 t2
+    withUnsolvedTypeInContext name' Nothing $ subsumes t1 t2
 
   t1, t2 ->
     unify t1 t2
@@ -72,17 +72,17 @@ unify = case _, _ of
     let
       t1 = Type.substituteType f1.name (Type.Skolem { ann: f1.ann, name: name' }) f1.type_
       t2 = Type.substituteType f2.name (Type.Skolem { ann: f2.ann, name: name' }) f2.type_
-    withTypeVariableInContext name' $ unify t1 t2
+    withTypeVariableInContext name' Nothing $ unify t1 t2
 
   t1, Type.Forall { ann, name, type_ } -> do
     name' <- append "t" <<< show <$> fresh
     let t2 = Type.substituteType name (Type.Skolem { ann, name: name' }) type_
-    withTypeVariableInContext name' $ unify t1 t2
+    withTypeVariableInContext name' Nothing $ unify t1 t2
 
   Type.Forall { ann, name, type_ }, t2 -> do
     name' <- append "t" <<< show <$> fresh
     let t1 = Type.substituteType name (Type.Skolem { ann, name: name' }) type_
-    withTypeVariableInContext name' $ unify t1 t2
+    withTypeVariableInContext name' Nothing $ unify t1 t2
 
   Type.Variable f1, Type.Variable f2
     | f1.name == f2.name -> variableInScopeCheck f1.name
@@ -295,7 +295,7 @@ check = case _, _ of
 
   e, Type.Forall { ann, name, type_ } -> do
     name' <- append "t" <<< show <$> fresh
-    withTypeVariableInContext name' do
+    withTypeVariableInContext name' Nothing do
       check e $ Type.substituteType name (Type.Skolem { ann, name: name' }) type_
 
   e, t -> do

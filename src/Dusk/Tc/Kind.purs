@@ -19,7 +19,14 @@ import Dusk.Tc.Context
   , _splitAtVariable
   )
 import Dusk.Tc.Context as Context
-import Dusk.Tc.Monad (CheckState, _context, _environment, fresh)
+import Dusk.Tc.Monad
+  ( CheckState
+  , _context
+  , _environment
+  , fresh
+  , withTypeVariableInContext
+  , withUnsolvedTypeInContext
+  )
 
 instantiate
   :: forall a m
@@ -275,8 +282,32 @@ subsumes
   -> Type a
   -> m Unit
 subsumes = case _, _ of
-  _, _ ->
-    throwError "subsumes: not implemented"
+  t1, t2
+    | Just f1 <- preview Type._Function t1
+    , Just f2 <- preview Type._Function t2 -> do
+        subsumes f2.argument f1.argument
+        context <- use _context
+        subsumes (Context.apply context f1.result) (Context.apply context f2.result)
+
+  t1, Type.Forall { ann, name, kind_, type_ } -> do
+    name' <- append "t" <<< show <$> fresh
+    let t2 = Type.substituteType name (Type.Skolem { ann, name: name' }) type_
+    withTypeVariableInContext name' kind_ $ subsumes t1 t2
+
+  Type.Forall { ann, name, kind_, type_ }, t2 -> do
+    name' <- fresh
+    let t1 = Type.substituteType name (Type.Unsolved { ann, name: name' }) type_
+    case kind_ of
+      Just _ ->
+        withUnsolvedTypeInContext name' kind_ $ subsumes t1 t2
+      Nothing -> do
+        kindName <- fresh
+        withUnsolvedTypeInContext kindName (Just $ Type.Constructor { ann, name: "Type" }) do
+          withUnsolvedTypeInContext name' (Just $ Type.Unsolved { ann, name: kindName }) do
+            subsumes t1 t2
+
+  t1, t2 ->
+    unify t1 t2
 
 unify
   :: forall a m
