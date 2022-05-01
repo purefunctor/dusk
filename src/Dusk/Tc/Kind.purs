@@ -285,9 +285,43 @@ unify
   => Type a
   -> Type a
   -> m Unit
-unify = case _, _ of
-  _, _ ->
-    throwError "subsumes: not implemented"
+unify =
+  let
+    unifyUnsolved :: _ -> _ -> m Unit
+    unifyUnsolved u@{ name: a } p1 = do
+      -- Δ ⊢ ρ1 ↝ ρ2 ⊣ Θ1, α : ω, Θ2
+      p2 <- promote u p1
+      use (_context <<< _splitAtUnsolved a) >>= case _ of
+        -- Θ1, α : ω, Θ2
+        Just { before: theta1, kind_: Just w1, after: theta2 } -> do
+          -- Θ1 ⊢ ρ2 : ω2
+          _context .= theta1
+          w2 <- elaborate p2
+          -- Θ1 ⊢ [Θ1] ω1 ≈ ω2 ⊣ Θ3
+          unify (Context.apply theta1 w1) w2
+          theta3 <- use _context
+          -- Θ3, α : ω1 = ρ2, Θ2
+          _context .= Context.push (Context.Solved a (Just w1) p2) theta3 <> theta2
+        _ ->
+          throwError "unify: could not split context"
+  in
+    case _, _ of
+      Type.Application t1, Type.Application t2 -> do
+        unify t1.function t2.function
+        context <- use _context
+        unify (Context.apply context t1.argument) (Context.apply context t2.argument)
+      Type.KindApplication t1, Type.KindApplication t2 -> do
+        unify t1.function t2.function
+        context <- use _context
+        unify (Context.apply context t1.argument) (Context.apply context t2.argument)
+      t1, t2 | t1 == t2 ->
+        pure unit
+      Type.Unsolved t1, t2 ->
+        unifyUnsolved t1 t2
+      t1, Type.Unsolved t2 ->
+        unifyUnsolved t2 t1
+      _, _ ->
+        throwError "unify: could not unify kinds"
 
 promote
   :: forall a m
