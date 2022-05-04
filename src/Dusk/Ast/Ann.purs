@@ -25,8 +25,8 @@ derive newtype instance Ord SourceSpan
 -- | * derived - defined from another node
 data From
   = FromAbyss
-  | FromSource { span :: SourceSpan }
-  | FromDerived { from :: From }
+  | FromSource SourceSpan
+  | FromDerived From
 
 derive instance Eq From
 derive instance Ord From

@@ -8,6 +8,7 @@ import Control.Monad.State.Class (class MonadState)
 import Data.Lens (preview, review, use, view, (%=), (.=))
 import Data.Maybe (Maybe(..), isNothing)
 import Data.Traversable (traverse_)
+import Dusk.Ast.Ann (From(..))
 import Dusk.Ast.Expr (Expr)
 import Dusk.Ast.Expr as Expr
 import Dusk.Ast.Type (Type)
@@ -26,11 +27,11 @@ import Dusk.Tc.Monad
   )
 
 subsumes
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => Type a
-  -> Type a
+  => Type From
+  -> Type From
   -> m Unit
 subsumes = case _, _ of
   -- Functions are contravariant in their arguments and covariant in their
@@ -47,41 +48,43 @@ subsumes = case _, _ of
 
   t1, Type.Forall { ann, name, type_ } -> do
     name' <- append "t" <<< show <$> fresh
-    let t2 = Type.substituteType name (Type.Skolem { ann, name: name' }) type_
+    let t2 = Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
     withTypeVariableInContext name' Nothing $ subsumes t1 t2
 
   Type.Forall { ann, name, type_ }, t2 -> do
     name' <- fresh
-    let t1 = Type.substituteType name (Type.Unsolved { ann, name: name' }) type_
+    let t1 = Type.substituteType name (Type.Unsolved { ann: FromDerived ann, name: name' }) type_
     withUnsolvedTypeInContext name' Nothing $ subsumes t1 t2
 
   t1, t2 ->
     unify t1 t2
 
 unify
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => Type a
-  -> Type a
+  => Type From
+  -> Type From
   -> m Unit
 unify = case _, _ of
 
   Type.Forall f1, Type.Forall f2 -> do
     name' <- append "t" <<< show <$> fresh
     let
-      t1 = Type.substituteType f1.name (Type.Skolem { ann: f1.ann, name: name' }) f1.type_
-      t2 = Type.substituteType f2.name (Type.Skolem { ann: f2.ann, name: name' }) f2.type_
+      t1 = Type.substituteType f1.name (Type.Skolem { ann: FromDerived f1.ann, name: name' })
+        f1.type_
+      t2 = Type.substituteType f2.name (Type.Skolem { ann: FromDerived f2.ann, name: name' })
+        f2.type_
     withTypeVariableInContext name' Nothing $ unify t1 t2
 
   t1, Type.Forall { ann, name, type_ } -> do
     name' <- append "t" <<< show <$> fresh
-    let t2 = Type.substituteType name (Type.Skolem { ann, name: name' }) type_
+    let t2 = Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
     withTypeVariableInContext name' Nothing $ unify t1 t2
 
   Type.Forall { ann, name, type_ }, t2 -> do
     name' <- append "t" <<< show <$> fresh
-    let t1 = Type.substituteType name (Type.Skolem { ann, name: name' }) type_
+    let t1 = Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
     withTypeVariableInContext name' Nothing $ unify t1 t2
 
   Type.Variable f1, Type.Variable f2
@@ -130,7 +133,7 @@ unify = case _, _ of
     when (isNothing $ Context.lookupUnsolved name context) do
       throwError "unify: variable not in scope"
 
-  occursCheck :: Int -> Type a -> m Unit
+  occursCheck :: Int -> Type From -> m Unit
   occursCheck n = go
     where
     go = case _ of
@@ -156,11 +159,11 @@ unify = case _, _ of
         go argument
 
 solve
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => { ann :: a, name :: Int }
-  -> Type a
+  => { ann :: From, name :: Int }
+  -> Type From
   -> m Unit
 solve u@{ name: a } t = do
   contexts <- splitContextAtUnsolved a
@@ -204,8 +207,8 @@ solve u@{ name: a } t = do
       u2 <- fresh
 
       let
-        a1 = { ann: f.ann0, name: u1 }
-        a2 = { ann: f.ann1, name: u2 }
+        a1 = { ann: FromDerived f.ann0, name: u1 }
+        a2 = { ann: FromDerived f.ann1, name: u2 }
         between = Context.fromArray
           [ Context.Unsolved u2 Nothing
           , Context.Unsolved u1 Nothing
@@ -228,8 +231,8 @@ solve u@{ name: a } t = do
       u2 <- fresh
 
       let
-        a1 = { ann: view Type._ann function, name: u1 }
-        a2 = { ann: view Type._ann argument, name: u2 }
+        a1 = { ann: FromDerived $ view Type._ann function, name: u1 }
+        a2 = { ann: FromDerived $ view Type._ann argument, name: u2 }
         between = Context.fromArray
           [ Context.Unsolved u2 Nothing
           , Context.Unsolved u1 Nothing
@@ -252,8 +255,8 @@ solve u@{ name: a } t = do
       u2 <- fresh
 
       let
-        a1 = { ann: view Type._ann function, name: u1 }
-        a2 = { ann: view Type._ann argument, name: u2 }
+        a1 = { ann: FromDerived $ view Type._ann function, name: u1 }
+        a2 = { ann: FromDerived $ view Type._ann argument, name: u2 }
         between = Context.fromArray
           [ Context.Unsolved u2 Nothing
           , Context.Unsolved u1 Nothing
@@ -272,7 +275,12 @@ solve u@{ name: a } t = do
       solve a2 (Context.apply contextN argument)
 
 check
-  :: forall a m. MonadState (CheckState a) m => MonadError String m => Expr a -> Type a -> m Unit
+  :: forall m
+   . MonadState (CheckState From) m
+  => MonadError String m
+  => Expr From
+  -> Type From
+  -> m Unit
 check = case _, _ of
 
   Expr.Literal _ (Expr.Char _), Type.Constructor { name: "Char" } ->
@@ -296,25 +304,26 @@ check = case _, _ of
   e, Type.Forall { ann, name, type_ } -> do
     name' <- append "t" <<< show <$> fresh
     withTypeVariableInContext name' Nothing do
-      check e $ Type.substituteType name (Type.Skolem { ann, name: name' }) type_
+      check e $ Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
 
   e, t -> do
     t' <- infer e
     context <- use _context
     subsumes (Context.apply context t') (Context.apply context t)
 
-infer :: forall a m. MonadState (CheckState a) m => MonadError String m => Expr a -> m (Type a)
+infer
+  :: forall m. MonadState (CheckState From) m => MonadError String m => Expr From -> m (Type From)
 infer = case _ of
 
   Expr.Literal ann literal -> case literal of
     Expr.Char _ ->
-      pure $ Type.Constructor { ann, name: "Char" }
+      pure $ Type.Constructor { ann: FromDerived ann, name: "Char" }
     Expr.String _ ->
-      pure $ Type.Constructor { ann, name: "String" }
+      pure $ Type.Constructor { ann: FromDerived ann, name: "String" }
     Expr.Int _ ->
-      pure $ Type.Constructor { ann, name: "Int" }
+      pure $ Type.Constructor { ann: FromDerived ann, name: "Int" }
     Expr.Float _ ->
-      pure $ Type.Constructor { ann, name: "Float" }
+      pure $ Type.Constructor { ann: FromDerived ann, name: "Float" }
     Expr.Array _ ->
       throwError "infer: unimplemented"
     Expr.Object _ ->
@@ -340,15 +349,15 @@ infer = case _ of
       )
 
     let
-      t1 = Type.Unsolved { ann, name: u1 }
-      t2 = Type.Unsolved { ann, name: u2 }
+      t1 = Type.Unsolved { ann: FromDerived ann, name: u1 }
+      t2 = Type.Unsolved { ann: FromDerived ann, name: u2 }
 
     withNameInEnvironment argument t1 $ check expression t2
 
     pure $ review Type._Function
-      { ann0: ann
-      , ann1: ann
-      , ann2: ann
+      { ann0: FromDerived ann
+      , ann1: FromDerived ann
+      , ann2: FromDerived ann
       , argument: t1
       , result: t2
       }
@@ -362,18 +371,20 @@ infer = case _ of
     check expression type_ $> type_
 
 inferApplication
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => Type a
-  -> Expr a
-  -> m (Type a)
+  => Type From
+  -> Expr From
+  -> m (Type From)
 inferApplication = case _, _ of
 
   Type.Forall { ann, name, type_ }, e -> do
     name' <- fresh
     _context %= Context.push (Context.Unsolved name' Nothing)
-    inferApplication (Type.substituteType name (Type.Unsolved { ann, name: name' }) type_) e
+    inferApplication
+      (Type.substituteType name (Type.Unsolved { ann: FromDerived ann, name: name' }) type_)
+      e
 
   Type.Unsolved { ann, name }, _ -> do
     contexts <- splitContextAtUnsolved name
@@ -382,16 +393,16 @@ inferApplication = case _, _ of
     u2 <- fresh
 
     let
-      t1 = Type.Unsolved { ann, name: u1 }
-      t2 = Type.Unsolved { ann, name: u2 }
+      t1 = Type.Unsolved { ann: FromDerived ann, name: u1 }
+      t2 = Type.Unsolved { ann: FromDerived ann, name: u2 }
       between = Context.fromArray
         [ Context.Unsolved u2 Nothing
         , Context.Unsolved u1 Nothing
         , Context.Solved name Nothing $
             review Type._Function
-              { ann0: ann
-              , ann1: ann
-              , ann2: ann
+              { ann0: FromDerived ann
+              , ann1: FromDerived ann
+              , ann2: FromDerived ann
               , argument: t1
               , result: t2
               }

@@ -8,6 +8,7 @@ import Control.Monad.State.Class (class MonadState)
 import Data.Lens (preview, review, use, view, (%=), (.=))
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested (type (/\), (/\))
+import Dusk.Ast.Ann (From(..))
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 import Dusk.Environment (_atTypes)
@@ -29,12 +30,12 @@ import Dusk.Tc.Monad
   )
 
 instantiate
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => (Type a /\ Type a)
-  -> Type a
-  -> m (Type a)
+  => (Type From /\ Type From)
+  -> Type From
+  -> m (Type From)
 instantiate = case _, _ of
   t1 /\ Type.Forall { ann, name, type_, kind_ }, k2
     -- `k2` has to be monokinded, otherwise, we subsume.
@@ -42,8 +43,8 @@ instantiate = case _, _ of
         name' <- fresh
 
         let
-          unsolved = Type.Unsolved { ann, name: name' }
-          t1' = Type.KindApplication { ann, function: t1, argument: unsolved }
+          unsolved = Type.Unsolved { ann: FromDerived ann, name: name' }
+          t1' = Type.KindApplication { ann: FromDerived ann, function: t1, argument: unsolved }
           k1' = Type.substituteType name unsolved type_
 
         _context %= Context.push (Context.Unsolved name' kind_)
@@ -54,23 +55,23 @@ instantiate = case _, _ of
     subsumes k1 k2 $> t1
 
 check
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => Type a
-  -> Type a
-  -> m (Type a)
+  => Type From
+  -> Type From
+  -> m (Type From)
 check t1 k1 = do
   t2 /\ k2 <- infer t1
   context <- use _context
   instantiate (t2 /\ Context.apply context k2) (Context.apply context k1)
 
 infer
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => Type a
-  -> m (Type a /\ Type a)
+  => Type From
+  -> m (Type From /\ Type From)
 infer = case _ of
 
   t@(Type.Constructor { name }) -> do
@@ -82,7 +83,7 @@ infer = case _ of
 
   Type.Forall fields@{ ann, name, type_, kind_: mKind } ->
     let
-      inferForall :: Type a -> Type a -> m (Type a /\ Type a)
+      inferForall :: Type From -> Type From -> m (Type From /\ Type From)
       inferForall kind_' type_' =
         use (_context <<< _splitAtVariable name) >>= case _ of
           Just { before: context2, kind_: Just kind_'', after: context3 }
@@ -103,20 +104,20 @@ infer = case _ of
     in
       case mKind of
         Just kind_ -> do
-          kind_' <- check kind_ (Type.Constructor { ann, name: "Type" })
+          kind_' <- check kind_ (Type.Constructor { ann: FromDerived ann, name: "Type" })
           _context %= Context.push (Context.Variable name (Just kind_'))
-          type_' <- check type_ (Type.Constructor { ann, name: "Type" })
+          type_' <- check type_ (Type.Constructor { ann: FromDerived ann, name: "Type" })
           inferForall kind_' type_'
         Nothing -> do
           name' <- fresh
-          let kind_' = Type.Unsolved { ann, name: name' }
+          let kind_' = Type.Unsolved { ann: FromDerived ann, name: name' }
           _context %= flip append
             ( Context.fromArray
-                [ Context.Unsolved name' $ Just $ Type.Constructor { ann, name: "Type" }
+                [ Context.Unsolved name' $ Just $ Type.Constructor { ann: FromDerived ann, name: "Type" }
                 , Context.Variable name $ Just $ kind_'
                 ]
             )
-          type_' <- check type_ (Type.Constructor { ann, name: "Type" })
+          type_' <- check type_ (Type.Constructor { ann: FromDerived ann, name: "Type" })
           inferForall kind_' type_'
 
   t@(Type.Variable { name }) -> do
@@ -153,7 +154,7 @@ infer = case _ of
         t2' <- check t2 kind_
 
         let
-          t1'' = Type.KindApplication { ann, function: t1', argument: t2' }
+          t1'' = Type.KindApplication { ann: FromDerived ann, function: t1', argument: t2' }
           t2'' = Type.substituteType name t2' type_
 
         pure (t1'' /\ t2'')
@@ -161,12 +162,12 @@ infer = case _ of
         throwError "infer: invalid kind application"
 
 inferApplication
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => (Type a /\ Type a)
-  -> Type a
-  -> m (Type a /\ Type a)
+  => (Type From /\ Type From)
+  -> Type From
+  -> m (Type From /\ Type From)
 inferApplication = case _, _ of
 
   t1 /\ Type.Forall { ann, name, kind_: mKind, type_ }, t2 ->
@@ -176,8 +177,8 @@ inferApplication = case _, _ of
         _context %= Context.push (Context.Unsolved name' mKind)
         let
           t1' = Type.KindApplication
-            { ann, function: t1, argument: Type.Unsolved { ann, name: name' } }
-          k1' = Type.substituteType name (Type.Unsolved { ann, name: name' }) type_
+            { ann: FromDerived ann, function: t1, argument: Type.Unsolved { ann: FromDerived ann, name: name' } }
+          k1' = Type.substituteType name (Type.Unsolved { ann: FromDerived ann, name: name' }) type_
         inferApplication (t1' /\ k1') t2
       Nothing ->
         throwError "inferApplication: unkinded forall"
@@ -186,18 +187,18 @@ inferApplication = case _, _ of
     u1 <- fresh
     u2 <- fresh
     let
-      u1' = Type.Unsolved { ann, name: u1 }
-      u2' = Type.Unsolved { ann, name: u2 }
+      u1' = Type.Unsolved { ann: FromDerived ann, name: u1 }
+      u2' = Type.Unsolved { ann: FromDerived ann, name: u2 }
     use (_context <<< _splitAtUnsolved name) >>= case _ of
       Just { before, kind_, after } ->
         let
           middle = Context.fromArray
-            [ Context.Unsolved u1 $ Just $ Type.Constructor { ann, name: "Type" }
-            , Context.Unsolved u2 $ Just $ Type.Constructor { ann, name: "Type" }
+            [ Context.Unsolved u1 $ Just $ Type.Constructor { ann: FromDerived ann, name: "Type" }
+            , Context.Unsolved u2 $ Just $ Type.Constructor { ann: FromDerived ann, name: "Type" }
             , Context.Solved name kind_ $ review Type._Function
-                { ann0: ann
-                , ann1: ann
-                , ann2: ann
+                { ann0: FromDerived ann
+                , ann1: FromDerived ann
+                , ann2: FromDerived ann
                 , argument: u1'
                 , result: u2'
                 }
@@ -207,13 +208,13 @@ inferApplication = case _, _ of
       Nothing ->
         throwError "inferApplication: could not split context"
     t2' <- check t2 u1'
-    pure $ Type.Application { ann, function: t1, argument: t2' } /\ u2'
+    pure $ Type.Application { ann: FromDerived ann, function: t1, argument: t2' } /\ u2'
 
   t1 /\ k1, t2 | Just { argument, result } <- preview Type._Function k1 -> do
     t2' <- check t2 argument
     context <- use _context
     let
-      t1' = Type.Application { ann: view Type._ann t1, function: t1, argument: t2' }
+      t1' = Type.Application { ann: FromDerived $ view Type._ann t1, function: t1, argument: t2' }
       k1' = Context.apply context result
     pure $ t1' /\ k1'
 
@@ -221,11 +222,11 @@ inferApplication = case _, _ of
     throwError "inferApplication: could not apply kind"
 
 elaborate
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => Type a
-  -> m (Type a)
+  => Type From
+  -> m (Type From)
 elaborate = case _ of
 
   Type.Constructor { name } -> do
@@ -236,7 +237,7 @@ elaborate = case _ of
         throwError "elaborate: unknown constructor"
 
   Type.Forall { ann } ->
-    pure $ Type.Constructor { ann, name: "Type" }
+    pure $ Type.Constructor { ann: FromDerived ann, name: "Type" }
 
   Type.Variable { name } ->
     use (_context <<< _lookupVariable name) >>= case _ of
@@ -275,11 +276,11 @@ elaborate = case _ of
         throwError "elaborate: must be a forall"
 
 subsumes
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => Type a
-  -> Type a
+  => Type From
+  -> Type From
   -> m Unit
 subsumes = case _, _ of
   t1, t2
@@ -291,30 +292,30 @@ subsumes = case _, _ of
 
   t1, Type.Forall { ann, name, kind_, type_ } -> do
     name' <- append "t" <<< show <$> fresh
-    let t2 = Type.substituteType name (Type.Skolem { ann, name: name' }) type_
+    let t2 = Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
     withTypeVariableInContext name' kind_ $ subsumes t1 t2
 
   Type.Forall { ann, name, kind_, type_ }, t2 -> do
     name' <- fresh
-    let t1 = Type.substituteType name (Type.Unsolved { ann, name: name' }) type_
+    let t1 = Type.substituteType name (Type.Unsolved { ann: FromDerived ann, name: name' }) type_
     case kind_ of
       Just _ ->
         withUnsolvedTypeInContext name' kind_ $ subsumes t1 t2
       Nothing -> do
         kindName <- fresh
-        withUnsolvedTypeInContext kindName (Just $ Type.Constructor { ann, name: "Type" }) do
-          withUnsolvedTypeInContext name' (Just $ Type.Unsolved { ann, name: kindName }) do
+        withUnsolvedTypeInContext kindName (Just $ Type.Constructor { ann: FromDerived ann, name: "Type" }) do
+          withUnsolvedTypeInContext name' (Just $ Type.Unsolved { ann: FromDerived ann, name: kindName }) do
             subsumes t1 t2
 
   t1, t2 ->
     unify t1 t2
 
 unify
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => Type a
-  -> Type a
+  => Type From
+  -> Type From
   -> m Unit
 unify =
   let
@@ -355,17 +356,17 @@ unify =
         throwError "unify: could not unify kinds"
 
 promote
-  :: forall a m
-   . MonadState (CheckState a) m
+  :: forall m
+   . MonadState (CheckState From) m
   => MonadError String m
-  => { ann :: a, name :: Int }
-  -> Type a
-  -> m (Type a)
+  => { ann :: From, name :: Int }
+  -> Type From
+  -> m (Type From)
 promote u@{ ann, name: a } = case _ of
 
   Type.Unsolved { name: b } ->
     let
-      splitContext :: m { context :: Context a, kind_ :: Type a }
+      splitContext :: m { context :: Context From, kind_ :: Type From }
       splitContext = do
         use (_context <<< _splitAtUnsolved a) >>= case _ of
           Just { before: context, after } ->
@@ -387,7 +388,7 @@ promote u@{ ann, name: a } = case _ of
         { context: theta } <- splitContext
         -- Δ[α][β : ρ] ⊢ β ↝ β1 ⊢ Θ[β1 : ρ1, a][β : ρ = β1]
         b1 <- fresh
-        let b1' = Type.Unsolved { ann, name: b1 }
+        let b1' = Type.Unsolved { ann: FromDerived ann, name: b1 }
         -- Θ[β1 : ρ1, a][β : ρ = β1]
         _context .= append theta
           ( Context.fromArray
