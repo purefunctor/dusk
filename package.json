@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "build": "spago build",
+    "format": "purs-tidy format-in-place 'src/**/*.purs' 'tests/**/*.purs'"
+  }
+}
