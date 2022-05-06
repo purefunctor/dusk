@@ -30,3 +30,8 @@ data From
 
 derive instance Eq From
 derive instance Ord From
+
+unfixFrom :: From -> From
+unfixFrom = case _ of
+  FromDerived from -> unfixFrom from
+  from -> from
