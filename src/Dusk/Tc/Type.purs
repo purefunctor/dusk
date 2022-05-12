@@ -131,7 +131,7 @@ unify = case _, _ of
   unsolvedInScopeCheck name = do
     context <- use _context
     when (isNothing $ Context.lookupUnsolved name context) do
-      throwError "unify: variable not in scope"
+      throwError "unify: unsolved not in scope"
 
   occursCheck :: Int -> Type From -> m Unit
   occursCheck n = go
