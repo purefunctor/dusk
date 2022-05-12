@@ -400,7 +400,7 @@ inferApplication = case _, _ of
       (Type.substituteType name (Type.Unsolved { ann: FromDerived ann, name: name' }) type_)
       e
 
-  Type.Unsolved { ann, name }, _ -> do
+  Type.Unsolved { ann, name }, e -> do
     contexts <- splitContextAtUnsolved name
 
     u1 <- fresh
@@ -423,6 +423,8 @@ inferApplication = case _, _ of
         ]
 
     _context .= contexts.before <> between <> contexts.after
+
+    check e t1
 
     pure t2
 
