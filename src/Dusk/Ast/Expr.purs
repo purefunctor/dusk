@@ -25,6 +25,7 @@ data Expr a
   | Lambda a Prim.String (Expr a)
   | Apply a (Expr a) (Expr a)
   | Annotate a (Expr a) (Type a)
+  | Let a Prim.String (Expr a) (Expr a)
 
 instance Eq (Expr a) where
   eq = case _, _ of
@@ -38,6 +39,8 @@ instance Eq (Expr a) where
       a == c && b == d
     Annotate _ a b, Annotate _ c d ->
       a == c && b == d
+    Let _ a b c, Let _ d e f ->
+      a == d && b == e && c == f
     _, _ ->
       false
 
@@ -53,6 +56,8 @@ instance Ord (Expr a) where
       a `compare` c <> b `compare` d
     Annotate _ a b, Annotate _ c d ->
       a `compare` c <> b `compare` d
+    Let _ a b c, Let _ d e f ->
+      a `compare` d <> b `compare` e <> c `compare` f
     a, b ->
       exprIndex a `compare` exprIndex b
     where
@@ -62,5 +67,6 @@ instance Ord (Expr a) where
       Lambda _ _ _ -> 2
       Apply _ _ _ -> 3
       Annotate _ _ _ -> 4
+      Let _ _ _ _ -> 5
 
 derive instance Functor Expr

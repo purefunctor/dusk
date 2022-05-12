@@ -370,6 +370,20 @@ infer = case _ of
   Expr.Annotate _ expression type_ ->
     check expression type_ $> type_
 
+  Expr.Let ann key value expr -> do
+    exprUnsolved <- fresh
+
+    _context %= Context.push (Context.Unsolved exprUnsolved Nothing)
+
+    let exprType = Type.Unsolved { ann: FromDerived ann, name: exprUnsolved }
+
+    -- TODO: allow `value` to refer to itself through `key`
+    valueType <- infer value
+
+    withNameInEnvironment key valueType $ check expr exprType
+
+    pure exprType
+
 inferApplication
   :: forall m
    . MonadState (CheckState From) m
