@@ -371,16 +371,23 @@ infer = case _ of
     check expression type_ $> type_
 
   Expr.Let ann key value expr -> do
+    valueUnsolved <- fresh
     exprUnsolved <- fresh
 
-    _context %= Context.push (Context.Unsolved exprUnsolved Nothing)
+    _context %= flip append
+      ( Context.fromArray
+          [ Context.Unsolved valueUnsolved Nothing
+          , Context.Unsolved exprUnsolved Nothing
+          ]
+      )
 
-    let exprType = Type.Unsolved { ann: FromDerived ann, name: exprUnsolved }
+    let
+      valueType = Type.Unsolved { ann: FromDerived ann, name: valueUnsolved }
+      exprType = Type.Unsolved { ann: FromDerived ann, name: exprUnsolved }
 
-    -- TODO: allow `value` to refer to itself through `key`
-    valueType <- infer value
-
-    withNameInEnvironment key valueType $ check expr exprType
+    withNameInEnvironment key valueType do
+      check value valueType
+      check expr exprType
 
     pure exprType
 
