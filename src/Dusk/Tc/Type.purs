@@ -391,6 +391,20 @@ infer = case _ of
 
     pure exprType
 
+  Expr.IfThenElse ann if_ then_ else_ -> do
+    u <- fresh
+
+    let t = Type.Unsolved { ann: FromDerived ann, name: u }
+
+    check if_ (Type.Constructor { ann: FromAbyss, name: "Boolean" })
+
+    _context %= Context.push (Context.Unsolved u Nothing)
+
+    check then_ t
+    check else_ t
+
+    pure t
+
 inferApplication
   :: forall m
    . MonadState (CheckState From) m
