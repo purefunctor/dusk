@@ -2,6 +2,7 @@ module Dusk.Ast.Expr where
 
 import Prelude
 
+import Data.Lens (Lens', lens)
 import Data.List (List)
 import Data.Map (Map)
 import Dusk.Ast.Type (Type)
@@ -76,3 +77,23 @@ instance Ord (Expr a) where
       IfThenElse _ _ _ _ -> 6
 
 derive instance Functor Expr
+
+_ann :: forall a. Lens' (Expr a) a
+_ann = lens u m
+  where
+  u = case _ of
+    Literal a _ -> a
+    Variable a _ -> a
+    Lambda a _ _ -> a
+    Apply a _ _ -> a
+    Annotate a _ _ -> a
+    Let a _ _ _ -> a
+    IfThenElse a _ _ _ -> a
+  m expr ann = case expr of
+    Literal _ a -> Literal ann a
+    Variable _ a -> Variable ann a
+    Lambda _ a b -> Lambda ann a b
+    Apply _ a b -> Apply ann a b
+    Annotate _ a b -> Annotate ann a b
+    Let _ a b c -> Let ann a b c
+    IfThenElse _ a b c -> IfThenElse ann a b c

@@ -26,6 +26,14 @@ import Dusk.Tc.Monad
   , withUnsolvedTypeInContext
   )
 
+type TypeExpr =
+  { e :: Expr From
+  , t :: Type From
+  }
+
+typeExprToExpr :: TypeExpr -> Expr From
+typeExprToExpr { e, t } = Expr.Annotate (FromDerived $ view Expr._ann e) e t
+
 subsumes
   :: forall m
    . MonadState (CheckState From) m
