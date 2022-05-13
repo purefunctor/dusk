@@ -58,15 +58,15 @@ subsumes = case _, _ of
         context <- use _context
         subsumes (Context.apply context f1.result) (Context.apply context f2.result)
 
-  t1, Type.Forall { ann, name, type_ } -> do
+  t1, Type.Forall { ann, name, kind_, type_ } -> do
     name' <- append "t" <<< show <$> fresh
     let t2 = Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
-    withTypeVariableInContext name' Nothing $ subsumes t1 t2
+    withTypeVariableInContext name' kind_ $ subsumes t1 t2
 
-  Type.Forall { ann, name, type_ }, t2 -> do
+  Type.Forall { ann, name, kind_, type_ }, t2 -> do
     name' <- fresh
     let t1 = Type.substituteType name (Type.Unsolved { ann: FromDerived ann, name: name' }) type_
-    withUnsolvedTypeInContext name' Nothing $ subsumes t1 t2
+    withUnsolvedTypeInContext name' kind_ $ subsumes t1 t2
 
   t1, t2 ->
     unify t1 t2
@@ -87,17 +87,17 @@ unify = case _, _ of
         f1.type_
       t2 = Type.substituteType f2.name (Type.Skolem { ann: FromDerived f2.ann, name: name' })
         f2.type_
-    withTypeVariableInContext name' Nothing $ unify t1 t2
+    withTypeVariableInContext name' f1.kind_ $ unify t1 t2
 
-  t1, Type.Forall { ann, name, type_ } -> do
+  t1, Type.Forall { ann, name, kind_, type_ } -> do
     name' <- append "t" <<< show <$> fresh
     let t2 = Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
-    withTypeVariableInContext name' Nothing $ unify t1 t2
+    withTypeVariableInContext name' kind_ $ unify t1 t2
 
-  Type.Forall { ann, name, type_ }, t2 -> do
+  Type.Forall { ann, name, kind_, type_ }, t2 -> do
     name' <- append "t" <<< show <$> fresh
     let t1 = Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
-    withTypeVariableInContext name' Nothing $ unify t1 t2
+    withTypeVariableInContext name' kind_ $ unify t1 t2
 
   Type.Variable f1, Type.Variable f2
     | f1.name == f2.name -> variableInScopeCheck f1.name
@@ -184,7 +184,7 @@ solve u@{ name: a } t = do
     -- Γ[a^] ⊢ Γ[a^ = t]
     insertToContext m = do
       Context.wellFormedType contexts.before m
-      _context .= Context.push (Context.Solved a Nothing m) contexts.before <> contexts.after
+      _context .= Context.push (Context.Solved a (Just $ Type.Constructor { ann: FromDerived $ u.ann, name: "Type" }) m) contexts.before <> contexts.after
 
   case t of
 
@@ -197,14 +197,14 @@ solve u@{ name: a } t = do
     Type.Skolem _ ->
       insertToContext t
 
-    Type.Unsolved { name: b } -> do
+    Type.Unsolved { ann, name: b } -> do
       case Context.splitAtUnsolved b contexts.after of
         -- Γ[a^][b^] ⊢ Γ[a^][b^ = a^]
         Just contexts' ->
           let
-            context = Context.push (Context.Unsolved a Nothing) contexts.before
+            context = Context.push (Context.Unsolved a (Just $ Type.Constructor { ann: FromDerived ann, name: "Type" })) contexts.before
               <> contexts.after
-            context' = Context.push (Context.Solved b Nothing $ Type.Unsolved u) contexts'.before
+            context' = Context.push (Context.Solved b (Just $ Type.Constructor { ann: FromDerived ann, name: "Type" }) $ Type.Unsolved u) contexts'.before
               <> contexts'.after
           in
             _context .= context <> context'
@@ -222,9 +222,9 @@ solve u@{ name: a } t = do
         a1 = { ann: FromDerived f.ann0, name: u1 }
         a2 = { ann: FromDerived f.ann1, name: u2 }
         between = Context.fromArray
-          [ Context.Unsolved u2 Nothing
-          , Context.Unsolved u1 Nothing
-          , Context.Solved a Nothing
+          [ Context.Unsolved u2 (Just $ Type.Constructor { ann: FromDerived f.ann1, name: "Type" })
+          , Context.Unsolved u1 (Just $ Type.Constructor { ann: FromDerived f.ann0, name: "Type" })
+          , Context.Solved a ((Just $ Type.Constructor { ann: FromAbyss, name: "Type" }))
               $ review Type._Function
               $ f
                   { argument = Type.Unsolved a1
@@ -246,9 +246,9 @@ solve u@{ name: a } t = do
         a1 = { ann: FromDerived $ view Type._ann function, name: u1 }
         a2 = { ann: FromDerived $ view Type._ann argument, name: u2 }
         between = Context.fromArray
-          [ Context.Unsolved u2 Nothing
-          , Context.Unsolved u1 Nothing
-          , Context.Solved a Nothing
+          [ Context.Unsolved u2 (Just $ Type.Constructor { ann: FromDerived $ view Type._ann argument, name: "Type" })
+          , Context.Unsolved u1 (Just $ Type.Constructor { ann: FromDerived $ view Type._ann function, name: "Type" })
+          , Context.Solved a (Just $ Type.Constructor { ann: FromAbyss, name: "Type" })
               $ Type.Application
                   { ann
                   , function: Type.Unsolved a1
@@ -270,9 +270,9 @@ solve u@{ name: a } t = do
         a1 = { ann: FromDerived $ view Type._ann function, name: u1 }
         a2 = { ann: FromDerived $ view Type._ann argument, name: u2 }
         between = Context.fromArray
-          [ Context.Unsolved u2 Nothing
-          , Context.Unsolved u1 Nothing
-          , Context.Solved a Nothing
+          [ Context.Unsolved u2 (Just $ Type.Constructor { ann: FromDerived $ view Type._ann argument, name: "Type" })
+          , Context.Unsolved u1 (Just $ Type.Constructor { ann: FromDerived $ view Type._ann function, name: "Type" })
+          , Context.Solved a (Just $ Type.Constructor { ann: FromAbyss, name: "Type" })
               $ Type.Application
                   { ann
                   , function: Type.Unsolved a1
@@ -313,9 +313,9 @@ check = case _, _ of
     | Just f <- preview Type._Function t ->
         withNameInEnvironment argument f.argument $ check expression f.result
 
-  e, Type.Forall { ann, name, type_ } -> do
+  e, Type.Forall { ann, name, kind_, type_ } -> do
     name' <- append "t" <<< show <$> fresh
-    withTypeVariableInContext name' Nothing do
+    withTypeVariableInContext name' kind_ do
       check e $ Type.substituteType name (Type.Skolem { ann: FromDerived ann, name: name' }) type_
 
   e, t -> do
@@ -355,8 +355,8 @@ infer = case _ of
 
     _context %= flip append
       ( Context.fromArray
-          [ Context.Unsolved u1 Nothing
-          , Context.Unsolved u2 Nothing
+          [ Context.Unsolved u1 (Just $ Type.Constructor { ann: FromDerived ann, name: "Type" })
+          , Context.Unsolved u2 (Just $ Type.Constructor { ann: FromDerived ann, name: "Type" })
           ]
       )
 
@@ -384,24 +384,20 @@ infer = case _ of
 
   Expr.Let { ann, name, value, expression } -> do
     valueUnsolved <- fresh
-    exprUnsolved <- fresh
 
-    _context %= flip append
-      ( Context.fromArray
-          [ Context.Unsolved valueUnsolved Nothing
-          , Context.Unsolved exprUnsolved Nothing
-          ]
+    _context %= Context.push
+      ( Context.Unsolved valueUnsolved (Just $ Type.Constructor { ann: FromDerived ann, name: "Type" })
       )
 
     let
       valueType = Type.Unsolved { ann: FromDerived ann, name: valueUnsolved }
-      exprType = Type.Unsolved { ann: FromDerived ann, name: exprUnsolved }
 
-    withNameInEnvironment name valueType do
+    expressionType <- withNameInEnvironment name valueType do
       check value valueType
-      check expression exprType
+      infer expression
 
-    pure exprType
+    context <- use _context
+    pure $ Context.apply context expressionType
 
   Expr.IfThenElse { ann, if_, then_, else_ } -> do
     u <- fresh
@@ -410,7 +406,7 @@ infer = case _ of
 
     check if_ (Type.Constructor { ann: FromAbyss, name: "Boolean" })
 
-    _context %= Context.push (Context.Unsolved u Nothing)
+    _context %= Context.push (Context.Unsolved u (Just $ Type.Constructor { ann, name: "Type" }))
 
     check then_ t
     check else_ t
@@ -426,9 +422,9 @@ inferApplication
   -> m (Type From)
 inferApplication = case _, _ of
 
-  Type.Forall { ann, name, type_ }, e -> do
+  Type.Forall { ann, name, kind_, type_ }, e -> do
     name' <- fresh
-    _context %= Context.push (Context.Unsolved name' Nothing)
+    _context %= Context.push (Context.Unsolved name' kind_)
     inferApplication
       (Type.substituteType name (Type.Unsolved { ann: FromDerived ann, name: name' }) type_)
       e
@@ -443,9 +439,9 @@ inferApplication = case _, _ of
       t1 = Type.Unsolved { ann: FromDerived ann, name: u1 }
       t2 = Type.Unsolved { ann: FromDerived ann, name: u2 }
       between = Context.fromArray
-        [ Context.Unsolved u2 Nothing
-        , Context.Unsolved u1 Nothing
-        , Context.Solved name Nothing $
+        [ Context.Unsolved u2 (Just $ Type.Constructor { ann, name: "Type" })
+        , Context.Unsolved u1 (Just $ Type.Constructor { ann, name: "Type" })
+        , Context.Solved name (Just $ Type.Constructor { ann, name: "Type" }) $
             review Type._Function
               { ann0: FromDerived ann
               , ann1: FromDerived ann
