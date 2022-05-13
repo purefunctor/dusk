@@ -113,7 +113,8 @@ infer = case _ of
           let kind_' = Type.Unsolved { ann: FromDerived ann, name: name' }
           _context %= flip append
             ( Context.fromArray
-                [ Context.Unsolved name' $ Just $ Type.Constructor { ann: FromDerived ann, name: "Type" }
+                [ Context.Unsolved name' $ Just $ Type.Constructor
+                    { ann: FromDerived ann, name: "Type" }
                 , Context.Variable name $ Just $ kind_'
                 ]
             )
@@ -177,7 +178,10 @@ inferApplication = case _, _ of
         _context %= Context.push (Context.Unsolved name' mKind)
         let
           t1' = Type.KindApplication
-            { ann: FromDerived ann, function: t1, argument: Type.Unsolved { ann: FromDerived ann, name: name' } }
+            { ann: FromDerived ann
+            , function: t1
+            , argument: Type.Unsolved { ann: FromDerived ann, name: name' }
+            }
           k1' = Type.substituteType name (Type.Unsolved { ann: FromDerived ann, name: name' }) type_
         inferApplication (t1' /\ k1') t2
       Nothing ->
@@ -303,8 +307,11 @@ subsumes = case _, _ of
         withUnsolvedTypeInContext name' kind_ $ subsumes t1 t2
       Nothing -> do
         kindName <- fresh
-        withUnsolvedTypeInContext kindName (Just $ Type.Constructor { ann: FromDerived ann, name: "Type" }) do
-          withUnsolvedTypeInContext name' (Just $ Type.Unsolved { ann: FromDerived ann, name: kindName }) do
+        let
+          t = Just $ Type.Constructor { ann: FromDerived ann, name: "Type" }
+          k = Just $ Type.Unsolved { ann: FromDerived ann, name: kindName }
+        withUnsolvedTypeInContext kindName t do
+          withUnsolvedTypeInContext name' k do
             subsumes t1 t2
 
   t1, t2 ->

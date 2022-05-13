@@ -21,60 +21,60 @@ derive instance Ord a => Ord (Literal a)
 derive instance Functor Literal
 
 data Expr a
-  = Literal a (Literal (Expr a))
-  | Variable a Prim.String
-  | Lambda a Prim.String (Expr a)
-  | Apply a (Expr a) (Expr a)
-  | Annotate a (Expr a) (Type a)
-  | Let a Prim.String (Expr a) (Expr a)
-  | IfThenElse a (Expr a) (Expr a) (Expr a)
+  = Literal { ann :: a, literal :: Literal (Expr a) }
+  | Variable { ann :: a, name :: Prim.String }
+  | Lambda { ann :: a, argument :: Prim.String, expression :: Expr a }
+  | Apply { ann :: a, function :: Expr a, argument :: Expr a }
+  | Annotate { ann :: a, expression :: Expr a, type_ :: Type a }
+  | Let { ann :: a, name :: Prim.String, value :: Expr a, expression :: Expr a }
+  | IfThenElse { ann :: a, if_ :: Expr a, then_ :: Expr a, else_ :: Expr a }
 
 instance Eq (Expr a) where
   eq = case _, _ of
-    Literal _ a, Literal _ b ->
-      a == b
-    Variable _ a, Variable _ b ->
-      a == b
-    Lambda _ a b, Lambda _ c d ->
-      a == c && b == d
-    Apply _ a b, Apply _ c d ->
-      a == c && b == d
-    Annotate _ a b, Annotate _ c d ->
-      a == c && b == d
-    Let _ a b c, Let _ d e f ->
-      a == d && b == e && c == f
-    IfThenElse _ a b c, IfThenElse _ d e f ->
-      a == d && b == e && c == f
+    Literal f1, Literal f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Variable f1, Variable f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Lambda f1, Lambda f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Apply f1, Apply f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Annotate f1, Annotate f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Let f1, Let f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    IfThenElse f1, IfThenElse f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
     _, _ ->
       false
 
 instance Ord (Expr a) where
   compare = case _, _ of
-    Literal _ a, Literal _ b ->
-      a `compare` b
-    Variable _ a, Variable _ b ->
-      a `compare` b
-    Lambda _ a b, Lambda _ c d ->
-      a `compare` c <> b `compare` d
-    Apply _ a b, Apply _ c d ->
-      a `compare` c <> b `compare` d
-    Annotate _ a b, Annotate _ c d ->
-      a `compare` c <> b `compare` d
-    IfThenElse _ a b c, IfThenElse _ d e f ->
-      a `compare` d <> b `compare` e <> c `compare` f
-    IfThenElse _ a b c, IfThenElse _ d e f ->
-      a `compare` d <> b `compare` e <> c `compare` f
+    Literal f1, Literal f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Variable f1, Variable f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Lambda f1, Lambda f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Apply f1, Apply f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Annotate f1, Annotate f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Let f1, Let f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    IfThenElse f1, IfThenElse f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
     a, b ->
       exprIndex a `compare` exprIndex b
     where
     exprIndex = case _ of
-      Literal _ _ -> 0
-      Variable _ _ -> 1
-      Lambda _ _ _ -> 2
-      Apply _ _ _ -> 3
-      Annotate _ _ _ -> 4
-      Let _ _ _ _ -> 5
-      IfThenElse _ _ _ _ -> 6
+      Literal _ -> 0
+      Variable _ -> 1
+      Lambda _ -> 2
+      Apply _ -> 3
+      Annotate _ -> 4
+      Let _ -> 5
+      IfThenElse _ -> 6
 
 derive instance Functor Expr
 
@@ -82,18 +82,18 @@ _ann :: forall a. Lens' (Expr a) a
 _ann = lens u m
   where
   u = case _ of
-    Literal a _ -> a
-    Variable a _ -> a
-    Lambda a _ _ -> a
-    Apply a _ _ -> a
-    Annotate a _ _ -> a
-    Let a _ _ _ -> a
-    IfThenElse a _ _ _ -> a
+    Literal { ann } -> ann
+    Variable { ann } -> ann
+    Lambda { ann } -> ann
+    Apply { ann } -> ann
+    Annotate { ann } -> ann
+    Let { ann } -> ann
+    IfThenElse { ann } -> ann
   m expr ann = case expr of
-    Literal _ a -> Literal ann a
-    Variable _ a -> Variable ann a
-    Lambda _ a b -> Lambda ann a b
-    Apply _ a b -> Apply ann a b
-    Annotate _ a b -> Annotate ann a b
-    Let _ a b c -> Let ann a b c
-    IfThenElse _ a b c -> IfThenElse ann a b c
+    Literal f1 -> Literal $ f1 { ann = ann }
+    Variable f1 -> Variable $ f1 { ann = ann }
+    Lambda f1 -> Lambda $ f1 { ann = ann }
+    Apply f1 -> Apply $ f1 { ann = ann }
+    Annotate f1 -> Annotate $ f1 { ann = ann }
+    Let f1 -> Let $ f1 { ann = ann }
+    IfThenElse f1 -> IfThenElse $ f1 { ann = ann }

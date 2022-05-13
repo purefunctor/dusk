@@ -32,7 +32,11 @@ type TypeExpr =
   }
 
 typeExprToExpr :: TypeExpr -> Expr From
-typeExprToExpr { e, t } = Expr.Annotate (FromDerived $ view Expr._ann e) e t
+typeExprToExpr { e, t } = Expr.Annotate -- (FromDerived $ view Expr._ann e) e t
+  { ann: FromDerived $ view Expr._ann e
+  , expression: e
+  , type_: t
+  }
 
 subsumes
   :: forall m
@@ -291,21 +295,21 @@ check
   -> m Unit
 check = case _, _ of
 
-  Expr.Literal _ (Expr.Char _), Type.Constructor { name: "Char" } ->
+  Expr.Literal { literal: Expr.Char _ }, Type.Constructor { name: "Char" } ->
     pure unit
-  Expr.Literal _ (Expr.String _), Type.Constructor { name: "String" } ->
+  Expr.Literal { literal: Expr.String _ }, Type.Constructor { name: "String" } ->
     pure unit
-  Expr.Literal _ (Expr.Int _), Type.Constructor { name: "Int" } ->
+  Expr.Literal { literal: Expr.Int _ }, Type.Constructor { name: "Int" } ->
     pure unit
-  Expr.Literal _ (Expr.Float _), Type.Constructor { name: "Float" } ->
+  Expr.Literal { literal: Expr.Float _ }, Type.Constructor { name: "Float" } ->
     pure unit
 
-  Expr.Literal _ (Expr.Array _), _ ->
+  Expr.Literal { literal: Expr.Array _ }, _ ->
     throwError "check: unimplemented"
-  Expr.Literal _ (Expr.Object _), _ ->
+  Expr.Literal { literal: Expr.Object _ }, _ ->
     throwError "check: unimplemented"
 
-  Expr.Lambda _ argument expression, t
+  Expr.Lambda { argument, expression }, t
     | Just f <- preview Type._Function t ->
         withNameInEnvironment argument f.argument $ check expression f.result
 
@@ -323,7 +327,7 @@ infer
   :: forall m. MonadState (CheckState From) m => MonadError String m => Expr From -> m (Type From)
 infer = case _ of
 
-  Expr.Literal ann literal -> case literal of
+  Expr.Literal { ann, literal } -> case literal of
     Expr.Char _ ->
       pure $ Type.Constructor { ann: FromDerived ann, name: "Char" }
     Expr.String _ ->
@@ -337,7 +341,7 @@ infer = case _ of
     Expr.Object _ ->
       throwError "infer: unimplemented"
 
-  Expr.Variable _ name -> do
+  Expr.Variable { name } -> do
     mType <- use (_environment <<< _atNames name)
     case mType of
       Just type_ ->
@@ -345,7 +349,7 @@ infer = case _ of
       Nothing ->
         throwError "infer: variable not in environment"
 
-  Expr.Lambda ann argument expression -> do
+  Expr.Lambda { ann, argument, expression } -> do
     u1 <- fresh
     u2 <- fresh
 
@@ -370,15 +374,15 @@ infer = case _ of
       , result: t2
       }
 
-  Expr.Apply _ function argument -> do
+  Expr.Apply { function, argument } -> do
     functionType <- infer function
     context <- use _context
     inferApplication (Context.apply context functionType) argument
 
-  Expr.Annotate _ expression type_ ->
+  Expr.Annotate { expression, type_ } ->
     check expression type_ $> type_
 
-  Expr.Let ann key value expr -> do
+  Expr.Let { ann, name, value, expression } -> do
     valueUnsolved <- fresh
     exprUnsolved <- fresh
 
@@ -393,13 +397,13 @@ infer = case _ of
       valueType = Type.Unsolved { ann: FromDerived ann, name: valueUnsolved }
       exprType = Type.Unsolved { ann: FromDerived ann, name: exprUnsolved }
 
-    withNameInEnvironment key valueType do
+    withNameInEnvironment name valueType do
       check value valueType
-      check expr exprType
+      check expression exprType
 
     pure exprType
 
-  Expr.IfThenElse ann if_ then_ else_ -> do
+  Expr.IfThenElse { ann, if_, then_, else_ } -> do
     u <- fresh
 
     let t = Type.Unsolved { ann: FromDerived ann, name: u }
