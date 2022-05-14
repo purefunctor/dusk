@@ -5,15 +5,16 @@ import Prim hiding (Type)
 
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.State.Class (class MonadState)
-import Data.Lens (preview, review, use, view, (%=), (.=))
+import Data.Lens (preview, review, set, use, view, (%=), (.=))
 import Data.Maybe (Maybe(..), isNothing)
 import Data.Traversable (traverse_)
-import Dusk.Ast.Ann (From(..))
+import Dusk.Ast.Ann (From)
 import Dusk.Ast.Expr (Expr)
 import Dusk.Ast.Expr as Expr
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 import Dusk.Environment (_atNames)
+import Dusk.Prim as P
 import Dusk.Tc.Context as Context
 import Dusk.Tc.Monad
   ( CheckState
@@ -185,7 +186,7 @@ solve u@{ name: a } t = do
     insertToContext m = do
       Context.wellFormedType contexts.before m
       _context .=
-        Context.push (Context.Solved a (Just $ Type.Constructor { ann: u.ann, name: "Type" }) m)
+        Context.push (Context.Solved a P.jTyType m)
           contexts.before <> contexts.after
 
   case t of
@@ -199,18 +200,18 @@ solve u@{ name: a } t = do
     Type.Skolem _ ->
       insertToContext t
 
-    Type.Unsolved { ann, name: b } -> do
+    Type.Unsolved { name: b } -> do
       case Context.splitAtUnsolved b contexts.after of
         -- Γ[a^][b^] ⊢ Γ[a^][b^ = a^]
         Just contexts' ->
           let
             context =
-              Context.push (Context.Unsolved a (Just $ Type.Constructor { ann, name: "Type" }))
+              Context.push (Context.Unsolved a P.jTyType)
                 contexts.before
                 <> contexts.after
             context' =
               Context.push
-                ( Context.Solved b (Just $ Type.Constructor { ann, name: "Type" }) $
+                ( Context.Solved b P.jTyType $
                     Type.Unsolved u
                 )
                 contexts'.before
@@ -231,9 +232,9 @@ solve u@{ name: a } t = do
         a1 = { ann: f.ann0, name: u1 }
         a2 = { ann: f.ann1, name: u2 }
         between = Context.fromArray
-          [ Context.Unsolved u2 (Just $ Type.Constructor { ann: f.ann1, name: "Type" })
-          , Context.Unsolved u1 (Just $ Type.Constructor { ann: f.ann0, name: "Type" })
-          , Context.Solved a ((Just $ Type.Constructor { ann: FromAbyss, name: "Type" }))
+          [ Context.Unsolved u2 P.jTyType
+          , Context.Unsolved u1 P.jTyType
+          , Context.Solved a P.jTyType
               $ review Type._Function
               $ f
                   { argument = Type.Unsolved a1
@@ -256,10 +257,10 @@ solve u@{ name: a } t = do
         a2 = { ann: view Type._ann argument, name: u2 }
         between = Context.fromArray
           [ Context.Unsolved u2
-              (Just $ Type.Constructor { ann: view Type._ann argument, name: "Type" })
+              P.jTyType
           , Context.Unsolved u1
-              (Just $ Type.Constructor { ann: view Type._ann function, name: "Type" })
-          , Context.Solved a (Just $ Type.Constructor { ann: FromAbyss, name: "Type" })
+              P.jTyType
+          , Context.Solved a P.jTyType
               $ Type.Application
                   { ann
                   , function: Type.Unsolved a1
@@ -282,10 +283,10 @@ solve u@{ name: a } t = do
         a2 = { ann: view Type._ann argument, name: u2 }
         between = Context.fromArray
           [ Context.Unsolved u2
-              (Just $ Type.Constructor { ann: view Type._ann argument, name: "Type" })
+              P.jTyType
           , Context.Unsolved u1
-              (Just $ Type.Constructor { ann: view Type._ann function, name: "Type" })
-          , Context.Solved a (Just $ Type.Constructor { ann: FromAbyss, name: "Type" })
+              P.jTyType
+          , Context.Solved a P.jTyType
               $ Type.Application
                   { ann
                   , function: Type.Unsolved a1
@@ -340,19 +341,20 @@ infer
   :: forall m. MonadState (CheckState From) m => MonadError String m => Expr From -> m (Type From)
 infer = case _ of
 
-  Expr.Literal { ann, literal } -> case literal of
-    Expr.Char _ ->
-      pure $ Type.Constructor { ann, name: "Char" }
-    Expr.String _ ->
-      pure $ Type.Constructor { ann, name: "String" }
-    Expr.Int _ ->
-      pure $ Type.Constructor { ann, name: "Int" }
-    Expr.Float _ ->
-      pure $ Type.Constructor { ann, name: "Float" }
-    Expr.Array _ ->
-      throwError "infer: unimplemented"
-    Expr.Object _ ->
-      throwError "infer: unimplemented"
+  Expr.Literal { ann, literal } ->
+    set Type._ann ann <$> case literal of
+      Expr.Char _ ->
+        pure P.tyChar
+      Expr.String _ ->
+        pure P.tyString
+      Expr.Int _ ->
+        pure P.tyInt
+      Expr.Float _ ->
+        pure P.tyFloat
+      Expr.Array _ ->
+        throwError "infer: unimplemented"
+      Expr.Object _ ->
+        throwError "infer: unimplemented"
 
   Expr.Variable { name } -> do
     mType <- use (_environment <<< _atNames name)
@@ -368,8 +370,8 @@ infer = case _ of
 
     _context %= flip append
       ( Context.fromArray
-          [ Context.Unsolved u1 (Just $ Type.Constructor { ann, name: "Type" })
-          , Context.Unsolved u2 (Just $ Type.Constructor { ann, name: "Type" })
+          [ Context.Unsolved u1 P.jTyType
+          , Context.Unsolved u2 P.jTyType
           ]
       )
 
@@ -399,7 +401,7 @@ infer = case _ of
     valueUnsolved <- fresh
 
     _context %= Context.push
-      ( Context.Unsolved valueUnsolved (Just $ Type.Constructor { ann, name: "Type" })
+      ( Context.Unsolved valueUnsolved P.jTyType
       )
 
     let
@@ -417,9 +419,9 @@ infer = case _ of
 
     let t = Type.Unsolved { ann, name: u }
 
-    check if_ (Type.Constructor { ann: FromAbyss, name: "Boolean" })
+    check if_ P.tyBoolean
 
-    _context %= Context.push (Context.Unsolved u (Just $ Type.Constructor { ann, name: "Type" }))
+    _context %= Context.push (Context.Unsolved u P.jTyType)
 
     check then_ t
     check else_ t
@@ -452,9 +454,9 @@ inferApplication = case _, _ of
       t1 = Type.Unsolved { ann, name: u1 }
       t2 = Type.Unsolved { ann, name: u2 }
       between = Context.fromArray
-        [ Context.Unsolved u2 (Just $ Type.Constructor { ann, name: "Type" })
-        , Context.Unsolved u1 (Just $ Type.Constructor { ann, name: "Type" })
-        , Context.Solved name (Just $ Type.Constructor { ann, name: "Type" }) $
+        [ Context.Unsolved u2 P.jTyType
+        , Context.Unsolved u1 P.jTyType
+        , Context.Solved name P.jTyType $
             review Type._Function
               { ann0: ann
               , ann1: ann

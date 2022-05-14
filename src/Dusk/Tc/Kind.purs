@@ -5,13 +5,14 @@ import Prim hiding (Type)
 
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.State.Class (class MonadState)
-import Data.Lens (preview, review, use, view, (%=), (.=))
+import Data.Lens (preview, review, set, use, view, (%=), (.=))
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Dusk.Ast.Ann (From(..))
+import Dusk.Ast.Ann (From)
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 import Dusk.Environment (_atTypes)
+import Dusk.Prim as P
 import Dusk.Tc.Context
   ( Context
   , _lookupUnsolved
@@ -94,31 +95,26 @@ infer = case _ of
                     { kind_ = Just kind_'
                     , type_ = Context.apply context3 type_'
                     }
-                  k = Type.Constructor
-                    { ann
-                    , name: "Type"
-                    }
-                pure $ t /\ k
+                pure $ t /\ (set Type._ann ann P.tyType)
           _ ->
             throwError "infer: could not split context"
     in
       case mKind of
         Just kind_ -> do
-          kind_' <- check kind_ (Type.Constructor { ann, name: "Type" })
-          _context %= Context.push (Context.Variable name (Just kind_'))
-          type_' <- check type_ (Type.Constructor { ann, name: "Type" })
+          kind_' <- check kind_ P.tyType
+          _context %= Context.push (Context.Variable name $ Just kind_')
+          type_' <- check type_ P.tyType
           inferForall kind_' type_'
         Nothing -> do
           name' <- fresh
           let kind_' = Type.Unsolved { ann, name: name' }
           _context %= flip append
             ( Context.fromArray
-                [ Context.Unsolved name' $ Just $ Type.Constructor
-                    { ann, name: "Type" }
-                , Context.Variable name $ Just $ kind_'
+                [ Context.Unsolved name' P.jTyType
+                , Context.Variable name $ Just kind_'
                 ]
             )
-          type_' <- check type_ (Type.Constructor { ann, name: "Type" })
+          type_' <- check type_ P.tyType
           inferForall kind_' type_'
 
   t@(Type.Variable { name }) -> do
@@ -197,8 +193,8 @@ inferApplication = case _, _ of
       Just { before, kind_, after } ->
         let
           middle = Context.fromArray
-            [ Context.Unsolved u1 $ Just $ Type.Constructor { ann, name: "Type" }
-            , Context.Unsolved u2 $ Just $ Type.Constructor { ann, name: "Type" }
+            [ Context.Unsolved u1 P.jTyType
+            , Context.Unsolved u2 P.jTyType
             , Context.Solved name kind_ $ review Type._Function
                 { ann0: ann
                 , ann1: ann
@@ -241,7 +237,7 @@ elaborate = case _ of
         throwError "elaborate: unknown constructor"
 
   Type.Forall { ann } ->
-    pure $ Type.Constructor { ann, name: "Type" }
+    pure $ set Type._ann ann P.tyType
 
   Type.Variable { name } ->
     use (_context <<< _lookupVariable name) >>= case _ of
@@ -307,10 +303,8 @@ subsumes = case _, _ of
         withUnsolvedTypeInContext name' kind_ $ subsumes t1 t2
       Nothing -> do
         kindName <- fresh
-        let
-          t = Just $ Type.Constructor { ann, name: "Type" }
-          k = Just $ Type.Unsolved { ann, name: kindName }
-        withUnsolvedTypeInContext kindName t do
+        let k = Just $ Type.Unsolved { ann, name: kindName }
+        withUnsolvedTypeInContext kindName P.jTyType do
           withUnsolvedTypeInContext name' k do
             subsumes t1 t2
 
