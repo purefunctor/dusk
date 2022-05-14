@@ -21,6 +21,7 @@ import Dusk.Tc.Monad
   , _context
   , _environment
   , fresh
+  , freshUnsolved
   , splitContextAtUnsolved
   , withNameInEnvironment
   , withTypeVariableInContext
@@ -225,80 +226,69 @@ solve u@{ name: a } t = do
       insertToContext t
 
     _ | Just f <- preview Type._Function t -> do
-      u1 <- fresh
-      u2 <- fresh
+      u1 <- freshUnsolved (view Type._ann f.argument) P.jTyType
+      u2 <- freshUnsolved (view Type._ann f.result) P.jTyType
 
       let
-        a1 = { ann: f.ann0, name: u1 }
-        a2 = { ann: f.ann1, name: u2 }
+        t' = review Type._Function $ f
+          { argument = u1.type_
+          , result = u2.type_
+          }
         between = Context.fromArray
-          [ Context.Unsolved u2 P.jTyType
-          , Context.Unsolved u1 P.jTyType
-          , Context.Solved a P.jTyType
-              $ review Type._Function
-              $ f
-                  { argument = Type.Unsolved a1
-                  , result = Type.Unsolved a2
-                  }
+          [ u2.element
+          , u1.element
+          , Context.Solved a P.jTyType t'
           ]
 
       _context .= contexts.before <> between <> contexts.after
-      solve a1 f.argument
+      solve u1.fields f.argument
 
       contextN <- use _context
-      solve a2 (Context.apply contextN f.result)
+      solve u2.fields (Context.apply contextN f.result)
 
     Type.Application { ann, function, argument } -> do
-      u1 <- fresh
-      u2 <- fresh
+      u1 <- freshUnsolved (view Type._ann function) P.jTyType
+      u2 <- freshUnsolved (view Type._ann argument) P.jTyType
 
       let
-        a1 = { ann: view Type._ann function, name: u1 }
-        a2 = { ann: view Type._ann argument, name: u2 }
+        t' = Type.Application
+          { ann
+          , function: u1.type_
+          , argument: u2.type_
+          }
         between = Context.fromArray
-          [ Context.Unsolved u2
-              P.jTyType
-          , Context.Unsolved u1
-              P.jTyType
-          , Context.Solved a P.jTyType
-              $ Type.Application
-                  { ann
-                  , function: Type.Unsolved a1
-                  , argument: Type.Unsolved a2
-                  }
+          [ u2.element
+          , u1.element
+          , Context.Solved a P.jTyType t'
           ]
 
       _context .= contexts.before <> between <> contexts.after
-      solve a1 function
+      solve u1.fields function
 
       contextN <- use _context
-      solve a2 (Context.apply contextN argument)
+      solve u2.fields (Context.apply contextN argument)
 
     Type.KindApplication { ann, function, argument } -> do
-      u1 <- fresh
-      u2 <- fresh
+      u1 <- freshUnsolved (view Type._ann function) P.jTyType
+      u2 <- freshUnsolved (view Type._ann argument) P.jTyType
 
       let
-        a1 = { ann: view Type._ann function, name: u1 }
-        a2 = { ann: view Type._ann argument, name: u2 }
+        t' = Type.KindApplication
+          { ann
+          , function: u1.type_
+          , argument: u2.type_
+          }
         between = Context.fromArray
-          [ Context.Unsolved u2
-              P.jTyType
-          , Context.Unsolved u1
-              P.jTyType
-          , Context.Solved a P.jTyType
-              $ Type.Application
-                  { ann
-                  , function: Type.Unsolved a1
-                  , argument: Type.Unsolved a2
-                  }
+          [ u2.element
+          , u1.element
+          , Context.Solved a P.jTyType t'
           ]
 
       _context .= contexts.before <> between <> contexts.after
-      solve a1 function
+      solve u1.fields function
 
       contextN <- use _context
-      solve a2 (Context.apply contextN argument)
+      solve u2.fields (Context.apply contextN argument)
 
 check
   :: forall m
@@ -365,28 +355,25 @@ infer = case _ of
         throwError "infer: variable not in environment"
 
   Expr.Lambda { ann, argument, expression } -> do
-    u1 <- fresh
-    u2 <- fresh
+    u1 <- freshUnsolved ann P.jTyType
+    u2 <- freshUnsolved ann P.jTyType
 
     _context %= flip append
       ( Context.fromArray
-          [ Context.Unsolved u1 P.jTyType
-          , Context.Unsolved u2 P.jTyType
+          [ u1.element
+          , u2.element
           ]
       )
 
-    let
-      t1 = Type.Unsolved { ann, name: u1 }
-      t2 = Type.Unsolved { ann, name: u2 }
-
-    withNameInEnvironment argument t1 $ check expression t2
+    withNameInEnvironment argument u1.type_ do
+      check expression u2.type_
 
     pure $ review Type._Function
       { ann0: ann
       , ann1: ann
       , ann2: ann
-      , argument: t1
-      , result: t2
+      , argument: u1.type_
+      , result: u2.type_
       }
 
   Expr.Apply { function, argument } -> do
@@ -398,35 +385,25 @@ infer = case _ of
     check expression type_ $> type_
 
   Expr.Let { ann, name, value, expression } -> do
-    valueUnsolved <- fresh
+    u <- freshUnsolved ann P.jTyType
+    _context %= Context.push u.element
 
-    _context %= Context.push
-      ( Context.Unsolved valueUnsolved P.jTyType
-      )
-
-    let
-      valueType = Type.Unsolved { ann, name: valueUnsolved }
-
-    expressionType <- withNameInEnvironment name valueType do
-      check value valueType
+    expressionType <- withNameInEnvironment name u.type_ do
+      check value u.type_
       infer expression
 
     context <- use _context
     pure $ Context.apply context expressionType
 
   Expr.IfThenElse { ann, if_, then_, else_ } -> do
-    u <- fresh
-
-    let t = Type.Unsolved { ann, name: u }
+    u <- freshUnsolved ann P.jTyType
+    _context %= Context.push u.element
 
     check if_ P.tyBoolean
+    check then_ u.type_
+    check else_ u.type_
 
-    _context %= Context.push (Context.Unsolved u P.jTyType)
-
-    check then_ t
-    check else_ t
-
-    pure t
+    pure u.type_
 
 inferApplication
   :: forall m
@@ -438,39 +415,35 @@ inferApplication
 inferApplication = case _, _ of
 
   Type.Forall { ann, name, kind_, type_ }, e -> do
-    name' <- fresh
-    _context %= Context.push (Context.Unsolved name' kind_)
-    inferApplication
-      (Type.substituteType name (Type.Unsolved { ann, name: name' }) type_)
-      e
+    u <- freshUnsolved ann kind_
+    _context %= Context.push u.element
+    inferApplication (Type.substituteType name u.type_ type_) e
 
   Type.Unsolved { ann, name }, e -> do
     contexts <- splitContextAtUnsolved name
 
-    u1 <- fresh
-    u2 <- fresh
+    u1 <- freshUnsolved ann P.jTyType
+    u2 <- freshUnsolved ann P.jTyType
 
     let
-      t1 = Type.Unsolved { ann, name: u1 }
-      t2 = Type.Unsolved { ann, name: u2 }
+      t' = review Type._Function
+        { ann0: ann
+        , ann1: ann
+        , ann2: ann
+        , argument: u1.type_
+        , result: u2.type_
+        }
       between = Context.fromArray
-        [ Context.Unsolved u2 P.jTyType
-        , Context.Unsolved u1 P.jTyType
-        , Context.Solved name P.jTyType $
-            review Type._Function
-              { ann0: ann
-              , ann1: ann
-              , ann2: ann
-              , argument: t1
-              , result: t2
-              }
+        [ u2.element
+        , u1.element
+        , Context.Solved name P.jTyType t'
         ]
 
     _context .= contexts.before <> between <> contexts.after
 
-    check e t1
+    check e u1.type_
 
-    pure t2
+    pure u2.type_
 
   t, e
     | Just f <- preview Type._Function t ->

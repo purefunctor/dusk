@@ -10,8 +10,9 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Dusk.Ast.Type (Type)
+import Dusk.Ast.Type as Type
 import Dusk.Environment (Environment, _names, emptyEnvironment)
-import Dusk.Tc.Context (Context, UnsolvedSplit)
+import Dusk.Tc.Context (Context, Element, UnsolvedSplit)
 import Dusk.Tc.Context as Context
 
 type CheckState a =
@@ -38,6 +39,23 @@ emptyCheckState =
 
 fresh :: forall a m. MonadState (CheckState a) m => m Int
 fresh = use _count <* (_count += 1)
+
+type FreshUnsolved a =
+  { fields :: { ann :: a, name :: Int }
+  , type_ :: Type a
+  , element :: Element a
+  }
+
+freshUnsolved
+  :: forall a m. MonadState (CheckState a) m => a -> Maybe (Type a) -> m (FreshUnsolved a)
+freshUnsolved a k = do
+  u <- fresh
+  let f = { ann: a, name: u }
+  pure
+    { fields: f
+    , type_: Type.Unsolved f
+    , element: Context.Unsolved u k
+    }
 
 splitContextAtUnsolved
   :: forall a m

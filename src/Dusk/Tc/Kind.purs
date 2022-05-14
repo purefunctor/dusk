@@ -26,6 +26,7 @@ import Dusk.Tc.Monad
   , _context
   , _environment
   , fresh
+  , freshUnsolved
   , withTypeVariableInContext
   , withUnsolvedTypeInContext
   )
@@ -41,14 +42,12 @@ instantiate = case _, _ of
   t1 /\ Type.Forall { ann, name, type_, kind_ }, k2
     -- `k2` has to be monokinded, otherwise, we subsume.
     | Type.isMonoType k2 -> do
-        name' <- fresh
+        u <- freshUnsolved ann kind_
+        _context %= Context.push u.element
 
         let
-          unsolved = Type.Unsolved { ann, name: name' }
-          t1' = Type.KindApplication { ann, function: t1, argument: unsolved }
-          k1' = Type.substituteType name unsolved type_
-
-        _context %= Context.push (Context.Unsolved name' kind_)
+          t1' = Type.KindApplication { ann, function: t1, argument: u.type_ }
+          k1' = Type.substituteType name u.type_ type_
 
         instantiate (t1' /\ k1') k2
 
@@ -106,16 +105,15 @@ infer = case _ of
           type_' <- check type_ P.tyType
           inferForall kind_' type_'
         Nothing -> do
-          name' <- fresh
-          let kind_' = Type.Unsolved { ann, name: name' }
+          u <- freshUnsolved ann P.jTyType
           _context %= flip append
             ( Context.fromArray
-                [ Context.Unsolved name' P.jTyType
-                , Context.Variable name $ Just kind_'
+                [ u.element
+                , Context.Variable name $ Just u.type_
                 ]
             )
           type_' <- check type_ P.tyType
-          inferForall kind_' type_'
+          inferForall u.type_ type_'
 
   t@(Type.Variable { name }) -> do
     use (_context <<< _lookupVariable name) >>= case _ of
@@ -170,45 +168,41 @@ inferApplication = case _, _ of
   t1 /\ Type.Forall { ann, name, kind_: mKind, type_ }, t2 ->
     case mKind of
       Just _ -> do
-        name' <- fresh
-        _context %= Context.push (Context.Unsolved name' mKind)
+        u <- freshUnsolved ann mKind
+        _context %= Context.push u.element
         let
-          t1' = Type.KindApplication
-            { ann
-            , function: t1
-            , argument: Type.Unsolved { ann, name: name' }
-            }
-          k1' = Type.substituteType name (Type.Unsolved { ann, name: name' }) type_
+          t1' = Type.KindApplication { ann, function: t1, argument: u.type_ }
+          k1' = Type.substituteType name u.type_ type_
         inferApplication (t1' /\ k1') t2
       Nothing ->
         throwError "inferApplication: unkinded forall"
 
   t1 /\ Type.Unsolved { ann, name }, t2 -> do
-    u1 <- fresh
-    u2 <- fresh
-    let
-      u1' = Type.Unsolved { ann, name: u1 }
-      u2' = Type.Unsolved { ann, name: u2 }
+    u1 <- freshUnsolved ann P.jTyType
+    u2 <- freshUnsolved ann P.jTyType
+
     use (_context <<< _splitAtUnsolved name) >>= case _ of
       Just { before, kind_, after } ->
         let
-          middle = Context.fromArray
-            [ Context.Unsolved u1 P.jTyType
-            , Context.Unsolved u2 P.jTyType
-            , Context.Solved name kind_ $ review Type._Function
-                { ann0: ann
-                , ann1: ann
-                , ann2: ann
-                , argument: u1'
-                , result: u2'
-                }
+          t' = review Type._Function
+            { ann0: ann
+            , ann1: ann
+            , ann2: ann
+            , argument: u1.type_
+            , result: u2.type_
+            }
+          between = Context.fromArray
+            [ u1.element
+            , u2.element
+            , Context.Solved name kind_ t'
             ]
         in
-          _context .= before <> middle <> after
+          _context .= before <> between <> after
       Nothing ->
         throwError "inferApplication: could not split context"
-    t2' <- check t2 u1'
-    pure $ Type.Application { ann, function: t1, argument: t2' } /\ u2'
+
+    t2' <- check t2 u1.type_
+    pure $ Type.Application { ann, function: t1, argument: t2' } /\ u2.type_
 
   t1 /\ k1, t2 | Just { argument, result } <- preview Type._Function k1 -> do
     t2' <- check t2 argument
