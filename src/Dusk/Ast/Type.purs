@@ -198,6 +198,38 @@ substituteTypes = go Set.empty
         , argument = go seen repl argument
         }
 
+substituteUnsolved' :: forall a. Map Int String -> Type a -> Type a
+substituteUnsolved' known = go
+  where
+  go = case _ of
+    Forall fields ->
+      Forall $ fields
+        { kind_ = go <$> fields.kind_
+        , type_ = go fields.type_
+        }
+    original@(Variable _) ->
+      original
+    original@(Skolem _) ->
+      original
+    original@(Unsolved { ann, name }) ->
+      case Map.lookup name known of
+        Just name' ->
+          Variable { ann, name: name' }
+        Nothing ->
+          original
+    original@(Constructor _) ->
+      original
+    Application fields ->
+      Application $ fields
+        { function = go fields.function
+        , argument = go fields.argument
+        }
+    KindApplication fields ->
+      KindApplication $ fields
+        { function = go fields.function
+        , argument = go fields.argument
+        }
+
 isMonoType :: forall a. Type a -> Boolean
 isMonoType = case _ of
   Forall _ ->

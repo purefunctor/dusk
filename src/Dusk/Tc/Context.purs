@@ -6,10 +6,12 @@ import Prim hiding (Type)
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Data.Array as Array
 import Data.Foldable (fold, foldl)
-import Data.Lens (Getter', to)
+import Data.Lens (Getter', to, view)
 import Data.List (List(..), (:))
 import Data.List as List
+import Data.Map as Map
 import Data.Maybe (Maybe(..), isJust)
+import Dusk.Ast.Ann (From(..))
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 
@@ -92,6 +94,26 @@ apply (Context context) = flip (foldl go) context
   where
   go t (Solved u _ m) = Type.solveType u m t
   go t _ = t
+
+generalize :: Context From -> Type From -> Type From
+generalize (Context context) type_ = makePolyType $ Type.substituteUnsolved' known type_
+  where
+  makePolyType = flip (List.foldl go) known
+    where
+    go a n = Type.Forall
+      { ann: FromDerived $ view Type._ann type_
+      , name: n
+      , kind_: Nothing
+      , type_: a
+      }
+
+  known = List.foldl go Map.empty context
+    where
+    go a = case _ of
+      Unsolved name _ ->
+        Map.insert name ("t" <> show name) a
+      _ ->
+        a
 
 lookupVariable :: forall a. String -> Context a -> Maybe { name :: String, kind_ :: Maybe (Type a) }
 lookupVariable name (Context context) = List.findMap go context
