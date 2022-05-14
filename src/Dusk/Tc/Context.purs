@@ -11,7 +11,6 @@ import Data.List (List(..), (:))
 import Data.List as List
 import Data.Map as Map
 import Data.Maybe (Maybe(..), isJust)
-import Dusk.Ast.Ann (From(..))
 import Dusk.Ast.Type (Type)
 import Dusk.Ast.Type as Type
 
@@ -95,13 +94,13 @@ apply (Context context) = flip (foldl go) context
   go t (Solved u _ m) = Type.solveType u m t
   go t _ = t
 
-generalize :: Context From -> Type From -> Type From
+generalize :: forall a. Context a -> Type a -> Type a
 generalize (Context context) type_ = makePolyType $ Type.substituteUnsolved' known type_
   where
   makePolyType = flip (List.foldl go) known
     where
     go a n = Type.Forall
-      { ann: FromDerived $ view Type._ann type_
+      { ann: view Type._ann type_
       , name: n
       , kind_: Nothing
       , type_: a
