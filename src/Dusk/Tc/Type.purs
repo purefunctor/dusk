@@ -347,8 +347,7 @@ infer = case _ of
         throwError "infer: unimplemented"
 
   Expr.Variable { name } -> do
-    mType <- use (_environment <<< _atNames name)
-    case mType of
+    use (_environment <<< _atNames name) >>= case _ of
       Just type_ ->
         pure type_
       Nothing ->
