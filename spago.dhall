@@ -8,6 +8,7 @@
   , "effect"
   , "either"
   , "foldable-traversable"
+  , "functions"
   , "lists"
   , "maybe"
   , "newtype"
@@ -16,6 +17,7 @@
   , "prelude"
   , "profunctor-lenses"
   , "spec"
+  , "tailrec"
   , "transformers"
   , "tuples"
   ]
