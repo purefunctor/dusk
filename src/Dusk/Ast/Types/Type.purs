@@ -1,6 +1,8 @@
-module Dusk.Ast.Traversals.Type
-  ( treadTypeEndo
-  , treadTypeEndoM
+-- | This modules defines the `Type` type and its associated traversals.
+module Dusk.Ast.Types.Type
+  ( Type(..)
+  , traverseTypeEndo
+  , traverseTypeEndoM
   ) where
 
 import Prelude
@@ -9,11 +11,71 @@ import Prim hiding (Type)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Data.Function.Uncurried (Fn2, Fn3, mkFn2, mkFn3, runFn2, runFn3)
 import Data.Identity (Identity(..))
+import Data.Maybe (Maybe)
 import Data.Newtype (unwrap)
 import Data.Traversable (traverse)
-import Dusk.Ast.Type (Type(..))
 import Safe.Coerce (coerce)
 import Uncurried.StateC (StateC(..))
+
+--
+
+data Type a
+  = Forall { ann :: a, name :: String, kind_ :: Maybe (Type a), type_ :: Type a }
+  | Variable { ann :: a, name :: String }
+  | Skolem { ann :: a, name :: String }
+  | Unsolved { ann :: a, name :: Int }
+  | Constructor { ann :: a, name :: String }
+  | Application { ann :: a, function :: Type a, argument :: Type a }
+  | KindApplication { ann :: a, function :: Type a, argument :: Type a }
+
+instance Eq (Type a) where
+  eq = case _, _ of
+    Forall f1, Forall f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Variable f1, Variable f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Skolem f1, Skolem f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Unsolved f1, Unsolved f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Constructor f1, Constructor f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    Application f1, Application f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    KindApplication f1, KindApplication f2 ->
+      f1 { ann = unit } == f2 { ann = unit }
+    _, _ ->
+      false
+
+instance Ord (Type a) where
+  compare = case _, _ of
+    Forall f1, Forall f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Variable f1, Variable f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Skolem f1, Skolem f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Unsolved f1, Unsolved f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Constructor f1, Constructor f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    Application f1, Application f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    KindApplication f1, KindApplication f2 ->
+      f1 { ann = unit } `compare` f2 { ann = unit }
+    t1, t2 ->
+      typeIndex t1 `compare` typeIndex t2
+    where
+    typeIndex = case _ of
+      Forall _ -> 0
+      Variable _ -> 1
+      Skolem _ -> 2
+      Unsolved _ -> 3
+      Constructor _ -> 4
+      Application _ -> 5
+      KindApplication _ -> 6
+
+derive instance Functor Type
 
 --
 
@@ -24,15 +86,15 @@ newtype TypeYieldEndo r a = TypeYieldEndo
 
 --
 
-typeTreadingEndo :: forall r a. Type a -> StateC r (TypeYieldEndo r a) (Type a)
-typeTreadingEndo =
+typeTraversalEndo :: forall r a. Type a -> StateC r (TypeYieldEndo r a) (Type a)
+typeTraversalEndo =
   let
     goType = mkFn3 \state1@(TypeYieldEndo yield1) type1 done ->
       runFn3 yield1.onEnter state1 type1
         ( mkFn2 \state2@(TypeYieldEndo yield2) -> case _ of
             Forall { ann, name, kind_, type_ } ->
               let
-                kindTraversal = unwrap $ traverse typeTreadingEndo kind_
+                kindTraversal = unwrap $ traverse typeTraversalEndo kind_
               in
                 runFn2 kindTraversal state2
                   ( mkFn2 \state3 kind_' ->
@@ -100,7 +162,7 @@ typeTreadingEndo =
 
 --
 
-treadTypeEndoM
+traverseTypeEndoM
   :: forall m a
    . MonadRec m
   => { onEnter :: Type a -> m (Type a)
@@ -108,47 +170,47 @@ treadTypeEndoM
      }
   -> Type a
   -> m (Type a)
-treadTypeEndoM { onEnter, onLeave } type0 =
+traverseTypeEndoM { onEnter, onLeave } type0 =
   let
     go = tailRecM case _ of
-      RunTypeTreadingEndoMore s mt k -> do
+      RunTypeTraversalEndoMore s mt k -> do
         t <- mt
         pure $ Loop $ runFn2 k s t
-      RunTypeTreadingEndoStop t ->
+      RunTypeTraversalEndoStop t ->
         pure $ Done t
 
-    treading = unwrap $ typeTreadingEndo type0
+    traverseing = unwrap $ typeTraversalEndo type0
 
     yield = TypeYieldEndo
       { onEnter: mkFn3 \s t k ->
-          RunTypeTreadingEndoMore s (onEnter t) k
+          RunTypeTraversalEndoMore s (onEnter t) k
       , onLeave: mkFn3 \s t k ->
-          RunTypeTreadingEndoMore s (onLeave t) k
+          RunTypeTraversalEndoMore s (onLeave t) k
       }
   in
-    go $ runFn2 treading yield $ mkFn2 \_ a -> RunTypeTreadingEndoStop a
+    go $ runFn2 traverseing yield $ mkFn2 \_ a -> RunTypeTraversalEndoStop a
 
-treadTypeEndo
+traverseTypeEndo
   :: forall a
    . { onEnter :: Type a -> Type a
      , onLeave :: Type a -> Type a
      }
   -> Type a
   -> Type a
-treadTypeEndo f t =
-  case treadTypeEndoM (coerce f) t of
+traverseTypeEndo f t =
+  case traverseTypeEndoM (coerce f) t of
     Identity result -> result
 
 --
 
-data RunTypeTreadingEndo m a
-  = RunTypeTreadingEndoMore
+data RunTypeTraversalEndo m a
+  = RunTypeTraversalEndoMore
       -- State
-      (TypeYieldEndo (RunTypeTreadingEndo m a) a)
+      (TypeYieldEndo (RunTypeTraversalEndo m a) a)
       -- Value
       (m (Type a))
       -- Continuation
-      (Fn2 (TypeYieldEndo (RunTypeTreadingEndo m a) a) (Type a) (RunTypeTreadingEndo m a))
-  | RunTypeTreadingEndoStop
+      (Fn2 (TypeYieldEndo (RunTypeTraversalEndo m a) a) (Type a) (RunTypeTraversalEndo m a))
+  | RunTypeTraversalEndoStop
       -- Result
       (Type a)
