@@ -1,4 +1,4 @@
-{ name = "my-project"
+{ name = "dusk"
 , dependencies =
   [ "aff"
   , "arrays"
@@ -13,6 +13,7 @@
   , "lists"
   , "maybe"
   , "newtype"
+  , "nonempty"
   , "ordered-collections"
   , "partial"
   , "prelude"
@@ -22,6 +23,7 @@
   , "tailrec"
   , "transformers"
   , "tuples"
+  , "uncurried-transformers"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]

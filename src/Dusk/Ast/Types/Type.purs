@@ -1,8 +1,11 @@
 -- | This modules defines the `Type` type and its associated traversals.
 module Dusk.Ast.Types.Type
   ( Type(..)
+  , TypeContext(..)
   , traverseTypeEndo
   , traverseTypeEndoM
+  , traverseTypeEndoCtx
+  , traverseTypeEndoCtxM
   ) where
 
 import Prelude
@@ -11,8 +14,10 @@ import Prim hiding (Type)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Data.Function.Uncurried (Fn2, Fn3, mkFn2, mkFn3, runFn2, runFn3)
 import Data.Identity (Identity(..))
+import Data.List (List(..), (:))
 import Data.Maybe (Maybe)
 import Data.Newtype (unwrap)
+import Data.NonEmpty (NonEmpty, (:|))
 import Data.Traversable (traverse)
 import Safe.Coerce (coerce)
 import Uncurried.StateC (StateC(..))
@@ -79,10 +84,29 @@ derive instance Functor Type
 
 --
 
+data TypeContext = InForallKind | InForallType | InAbyss
+
+derive instance Eq TypeContext
+
 newtype TypeYieldEndo r a = TypeYieldEndo
-  { onEnter :: Fn3 (TypeYieldEndo r a) (Type a) (Fn2 (TypeYieldEndo r a) (Type a) r) r
+  { context :: NonEmpty List TypeContext
+  , onEnter :: Fn3 (TypeYieldEndo r a) (Type a) (Fn2 (TypeYieldEndo r a) (Type a) r) r
   , onLeave :: Fn3 (TypeYieldEndo r a) (Type a) (Fn2 (TypeYieldEndo r a) (Type a) r) r
   }
+
+pushContext :: forall r a. TypeYieldEndo r a -> TypeContext -> TypeYieldEndo r a
+pushContext (TypeYieldEndo fields) context =
+  case fields.context of
+    head :| tail ->
+      TypeYieldEndo $ fields { context = context :| head : tail }
+
+discardContext :: forall r a. TypeYieldEndo r a -> TypeYieldEndo r a
+discardContext (TypeYieldEndo fields) =
+  case fields.context of
+    _ :| Nil ->
+      TypeYieldEndo $ fields { context = fields.context }
+    _ :| head : tail ->
+      TypeYieldEndo $ fields { context = head :| tail }
 
 --
 
@@ -96,9 +120,9 @@ typeTraversalEndo =
               let
                 kindTraversal = unwrap $ traverse typeTraversalEndo kind_
               in
-                runFn2 kindTraversal state2
+                runFn2 kindTraversal (pushContext state2 InForallKind)
                   ( mkFn2 \state3 kind_' ->
-                      runFn3 goType state3 type_
+                      runFn3 goType (pushContext state3 InForallType) type_
                         ( mkFn2 \state4@(TypeYieldEndo yield4) type_' ->
                             let
                               t' = Forall
@@ -108,7 +132,7 @@ typeTraversalEndo =
                                 , type_: type_'
                                 }
                             in
-                              runFn3 yield4.onLeave state4 t' done
+                              runFn3 yield4.onLeave (discardContext state4) t' done
                         )
                   )
 
@@ -124,7 +148,7 @@ typeTraversalEndo =
                               , argument: argument'
                               }
                           in
-                            runFn3 yield4.onLeave state4 t' done
+                            runFn3 yield4.onLeave (discardContext state4) t' done
                       )
                 )
 
@@ -140,21 +164,21 @@ typeTraversalEndo =
                               , argument: argument'
                               }
                           in
-                            runFn3 yield4.onLeave state4 t' done
+                            runFn3 yield4.onLeave (discardContext state4) t' done
                       )
                 )
 
             original@(Variable _) ->
-              runFn3 yield2.onLeave state2 original done
+              runFn3 yield2.onLeave (discardContext state2) original done
 
             original@(Skolem _) ->
-              runFn3 yield2.onLeave state2 original done
+              runFn3 yield2.onLeave (discardContext state2) original done
 
             original@(Unsolved _) ->
-              runFn3 yield2.onLeave state2 original done
+              runFn3 yield2.onLeave (discardContext state2) original done
 
             original@(Constructor _) ->
-              runFn3 yield2.onLeave state2 original done
+              runFn3 yield2.onLeave (discardContext state2) original done
         )
   in
     \type0 -> StateC $ mkFn2 \state0 done ->
@@ -162,15 +186,15 @@ typeTraversalEndo =
 
 --
 
-traverseTypeEndoM
+traverseTypeEndoCtxM
   :: forall m a
    . MonadRec m
-  => { onEnter :: Type a -> m (Type a)
-     , onLeave :: Type a -> m (Type a)
+  => { onEnter :: TypeContext -> Type a -> m (Type a)
+     , onLeave :: TypeContext -> Type a -> m (Type a)
      }
   -> Type a
   -> m (Type a)
-traverseTypeEndoM { onEnter, onLeave } type0 =
+traverseTypeEndoCtxM { onEnter, onLeave } type0 =
   let
     go = tailRecM case _ of
       RunTypeTraversalEndoMore s mt k -> do
@@ -182,13 +206,36 @@ traverseTypeEndoM { onEnter, onLeave } type0 =
     traverseing = unwrap $ typeTraversalEndo type0
 
     yield = TypeYieldEndo
-      { onEnter: mkFn3 \s t k ->
-          RunTypeTraversalEndoMore s (onEnter t) k
-      , onLeave: mkFn3 \s t k ->
-          RunTypeTraversalEndoMore s (onLeave t) k
+      { context: InAbyss :| Nil
+      , onEnter: mkFn3 \s@(TypeYieldEndo { context: head :| _ }) t k ->
+          RunTypeTraversalEndoMore s (onEnter head t) k
+      , onLeave: mkFn3 \s@(TypeYieldEndo { context: head :| _ }) t k ->
+          RunTypeTraversalEndoMore s (onLeave head t) k
       }
   in
     go $ runFn2 traverseing yield $ mkFn2 \_ a -> RunTypeTraversalEndoStop a
+
+traverseTypeEndoM
+  :: forall m a
+   . MonadRec m
+  => { onEnter :: Type a -> m (Type a)
+     , onLeave :: Type a -> m (Type a)
+     }
+  -> Type a
+  -> m (Type a)
+traverseTypeEndoM { onEnter, onLeave } =
+  traverseTypeEndoCtxM { onEnter: \_ -> onEnter, onLeave: \_ -> onLeave }
+
+traverseTypeEndoCtx
+  :: forall a
+   . { onEnter :: TypeContext -> Type a -> Type a
+     , onLeave :: TypeContext -> Type a -> Type a
+     }
+  -> Type a
+  -> Type a
+traverseTypeEndoCtx f t =
+  case traverseTypeEndoCtxM (coerce f) t of
+    Identity result -> result
 
 traverseTypeEndo
   :: forall a

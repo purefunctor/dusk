@@ -7,6 +7,7 @@ module Dusk.Ast.Type
 import Prelude hiding (apply)
 import Prim hiding (Type)
 
+import Control.Monad.Writer.Class (tell)
 import Data.Foldable (foldMap)
 import Data.Lens (Lens', lens)
 import Data.Lens.Prism (Prism', prism')
@@ -15,52 +16,70 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Set (Set)
 import Data.Set as Set
-import Dusk.Ast.Types.Type (Type(..), traverseTypeEndoM)
+import Debug as Debug
+import Dusk.Ast.Types.Type (Type(..), traverseTypeEndo, traverseTypeEndoM)
 import Partial.Unsafe (unsafeCrashWith)
+import Uncurried.Writer (Writer, execWriter)
 
-solveType :: forall a. Int -> Type a -> Type a -> Type a
-solveType _ (Forall _) _ = unsafeCrashWith "solveType: expected a monotype"
-solveType u m t = case t of
-  Forall fields@{ kind_, type_ } ->
-    Forall $ fields
-      { kind_ = solveType u m <$> kind_
-      , type_ = solveType u m type_
-      }
-  Application fields@{ function, argument } ->
-    Application $ fields
-      { function = solveType u m function
-      , argument = solveType u m argument
-      }
-  KindApplication fields@{ function, argument } ->
-    KindApplication $ fields
-      { function = solveType u m function
-      , argument = solveType u m argument
-      }
-  Unsolved { name: u' } | u == u' -> m
-  _ -> t
+--------------------------------------------------------------------------------
+------------------------------------- QUERIES ----------------------------------
+--------------------------------------------------------------------------------
 
+-- | Determines whether or not a type is a monotype.
+isMonoType :: forall a. Type a -> Boolean
+isMonoType = case _ of
+  Forall _ ->
+    false
+  _ ->
+    true
+
+-- | Collects all type variables in a type, regardless if they're free
+-- | or bound.
 variablesInType :: forall a. Type a -> Set String
-variablesInType = case _ of
-  Forall { type_, kind_ } ->
-    variablesInType type_ <> Set.unions (variablesInType <$> kind_)
-  Variable { name } ->
-    Set.singleton name
-  Skolem _ ->
-    Set.empty
-  Unsolved _ ->
-    Set.empty
-  Constructor _ ->
-    Set.empty
-  Application { function, argument } ->
-    variablesInType function <> variablesInType argument
-  KindApplication { function, argument } ->
-    variablesInType function <> variablesInType argument
+variablesInType = execWriter <<< traverseTypeEndoM { onEnter, onLeave: pure }
+  where
+  onEnter :: Type a -> Writer (Set String) (Type a)
+  onEnter t = case t of
+    Variable { name } ->
+      tell (Set.singleton name) $> t
+    _ ->
+      pure t
 
+--------------------------------------------------------------------------------
+----------------------------------- TRAVERSALS ---------------------------------
+--------------------------------------------------------------------------------
+
+-- | Given an unsolved type variable `u`, a replacement type `r`, this
+-- | substitutes all occurences of `u` with `r` on a type.
+-- |
+-- | Note: this function crashes when `r` is a polytype, as we currently
+-- | restrict type impredicativity in the type system.
+solveType :: forall a. Int -> Type a -> Type a -> Type a
+solveType name into from =
+  let
+    onEnter :: Type a -> Type a
+    onEnter = case _ of
+      Unsolved { name: name' } | name == name' ->
+        into
+      original ->
+        original
+  in
+    case into of
+      Forall _ ->
+        unsafeCrashWith "solveType: impredicativity!"
+      _ ->
+        traverseTypeEndo { onEnter, onLeave: identity } from
+
+-- | Given a type variable `v`, a replacement type `r`, this substitutes
+-- | all occurences of `v` with `r` on a type.
 substituteType :: forall a. String -> Type a -> Type a -> Type a
-substituteType k v = substituteTypes (Map.singleton k v)
+substituteType k v = substituteType' (Map.singleton k v)
 
-substituteTypes :: forall a. Map String (Type a) -> Type a -> Type a
-substituteTypes = go Set.empty
+-- | Given a `Map` of type variables `v` to replacement types `r`, this
+-- | substitutes all occurences of `v` with `r` on a type, while also
+-- | making sure that names are never shadowed.
+substituteType' :: forall a. Map String (Type a) -> Type a -> Type a
+substituteType' = go Set.empty
   where
   freshen :: Set String -> String -> String
   freshen known = goFreshen 0
@@ -146,44 +165,20 @@ substituteTypes = go Set.empty
         }
 
 substituteUnsolved' :: forall a. Map Int String -> Type a -> Type a
-substituteUnsolved' known = go
+substituteUnsolved' known = traverseTypeEndo { onEnter, onLeave: identity }
   where
-  go = case _ of
-    Forall fields ->
-      Forall $ fields
-        { kind_ = go <$> fields.kind_
-        , type_ = go fields.type_
-        }
-    original@(Variable _) ->
+  onEnter :: Type a -> Type a
+  onEnter = case _ of
+    Unsolved { ann, name } | Just name' <- Map.lookup name known ->
+      Variable { ann, name: name' }
+    original ->
       original
-    original@(Skolem _) ->
-      original
-    original@(Unsolved { ann, name }) ->
-      case Map.lookup name known of
-        Just name' ->
-          Variable { ann, name: name' }
-        Nothing ->
-          original
-    original@(Constructor _) ->
-      original
-    Application fields ->
-      Application $ fields
-        { function = go fields.function
-        , argument = go fields.argument
-        }
-    KindApplication fields ->
-      KindApplication $ fields
-        { function = go fields.function
-        , argument = go fields.argument
-        }
 
-isMonoType :: forall a. Type a -> Boolean
-isMonoType = case _ of
-  Forall _ ->
-    false
-  _ ->
-    true
+--------------------------------------------------------------------------------
+------------------------------------- OPTICS -----------------------------------
+--------------------------------------------------------------------------------
 
+-- | An optic that focuses on a `Type`'s annotation.
 _ann :: forall a. Lens' (Type a) a
 _ann = lens u m
   where
@@ -205,6 +200,7 @@ _ann = lens u m
     Application f -> Application $ f { ann = ann }
     KindApplication f -> KindApplication $ f { ann = ann }
 
+-- | A prism that constructs and deconstructs a `Function` type.
 _Function
   :: forall a
    . Prism' (Type a)
