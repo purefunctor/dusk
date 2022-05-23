@@ -17,7 +17,6 @@ import Data.Identity (Identity(..))
 import Data.List (List(..), (:))
 import Data.Maybe (Maybe)
 import Data.Newtype (unwrap)
-import Data.NonEmpty (NonEmpty, (:|))
 import Data.Traversable (traverse)
 import Safe.Coerce (coerce)
 import Uncurried.StateC (StateC(..))
@@ -89,24 +88,22 @@ data TypeContext = InForallKind | InForallType | InAbyss
 derive instance Eq TypeContext
 
 newtype TypeYieldEndo r a = TypeYieldEndo
-  { context :: NonEmpty List TypeContext
+  { context :: List TypeContext
   , onEnter :: Fn3 (TypeYieldEndo r a) (Type a) (Fn2 (TypeYieldEndo r a) (Type a) r) r
   , onLeave :: Fn3 (TypeYieldEndo r a) (Type a) (Fn2 (TypeYieldEndo r a) (Type a) r) r
   }
 
 pushContext :: forall r a. TypeYieldEndo r a -> TypeContext -> TypeYieldEndo r a
-pushContext (TypeYieldEndo fields) context =
-  case fields.context of
-    head :| tail ->
-      TypeYieldEndo $ fields { context = context :| head : tail }
+pushContext (TypeYieldEndo fields) context = TypeYieldEndo $ fields
+  { context = context : fields.context }
 
 discardContext :: forall r a. TypeYieldEndo r a -> TypeYieldEndo r a
 discardContext (TypeYieldEndo fields) =
   case fields.context of
-    _ :| Nil ->
+    Nil ->
       TypeYieldEndo $ fields { context = fields.context }
-    _ :| head : tail ->
-      TypeYieldEndo $ fields { context = head :| tail }
+    _ : tail ->
+      TypeYieldEndo $ fields { context = tail }
 
 --
 
@@ -206,11 +203,21 @@ traverseTypeEndoCtxM { onEnter, onLeave } type0 =
     traverseing = unwrap $ typeTraversalEndo type0
 
     yield = TypeYieldEndo
-      { context: InAbyss :| Nil
-      , onEnter: mkFn3 \s@(TypeYieldEndo { context: head :| _ }) t k ->
-          RunTypeTraversalEndoMore s (onEnter head t) k
-      , onLeave: mkFn3 \s@(TypeYieldEndo { context: head :| _ }) t k ->
-          RunTypeTraversalEndoMore s (onLeave head t) k
+      { context: Nil
+      , onEnter: mkFn3 \s@(TypeYieldEndo { context }) t k ->
+          let
+            context' = case context of
+              Nil -> InAbyss
+              head : _ -> head
+          in
+            RunTypeTraversalEndoMore s (onEnter context' t) k
+      , onLeave: mkFn3 \s@(TypeYieldEndo { context }) t k ->
+          let
+            context' = case context of
+              Nil -> InAbyss
+              head : _ -> head
+          in
+            RunTypeTraversalEndoMore s (onLeave context' t) k
       }
   in
     go $ runFn2 traverseing yield $ mkFn2 \_ a -> RunTypeTraversalEndoStop a

@@ -2,13 +2,13 @@ module Test.Main where
 
 import Prelude
 
-import Effect (Effect)
-import Effect.Aff (launchAff_)
 import Data.Lens (review)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested ((/\))
 import Dusk.Ast.Type (Type(..), _Function, substituteType')
+import Effect (Effect)
+import Effect.Aff (launchAff_)
 import Test.Spec (describe, it)
 import Test.Spec.Assertions (shouldEqual)
 import Test.Spec.Reporter (consoleReporter)
@@ -47,7 +47,8 @@ main = launchAff_ $ runSpec [ consoleReporter ] do
             , "a1" /\ mkVariable "a2"
             , "a2" /\ mkVariable "a3"
             ]
-          actual = substituteType' replacements $ mkForall "a" $ mkFunction (mkVariable "a") (mkVariable "b")
+          actual = substituteType' replacements $ mkForall "a" $ mkFunction (mkVariable "a")
+            (mkVariable "b")
           expected = mkForall "a4" $ mkFunction (mkVariable "a4") (mkVariable "a")
 
         (actual == expected) `shouldEqual` true

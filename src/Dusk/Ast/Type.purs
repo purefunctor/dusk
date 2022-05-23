@@ -16,8 +16,13 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Set (Set)
 import Data.Set as Set
-import Debug as Debug
-import Dusk.Ast.Types.Type (Type(..), traverseTypeEndo, traverseTypeEndoM)
+import Dusk.Ast.Types.Type
+  ( Type(..)
+  , traverseTypeEndo
+  , traverseTypeEndoCtx
+  , traverseTypeEndoCtxM
+  , traverseTypeEndoM
+  )
 import Partial.Unsafe (unsafeCrashWith)
 import Uncurried.Writer (Writer, execWriter)
 
